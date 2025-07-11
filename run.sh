@@ -43,6 +43,23 @@ function check_deps() {
     done
 }
 
+function safe_delete() {
+    local file_path="$1"
+    local verification_message="$2"
+    
+    if [ -f "$file_path" ]; then
+        echo "Deleting $verification_message: $file_path"
+        rm "$file_path"
+        if [ $? -eq 0 ]; then
+            echo "Successfully deleted: $file_path"
+        else
+            echo "Warning: Failed to delete $file_path"
+        fi
+    else
+        echo "File not found (may already be deleted): $file_path"
+    fi
+}
+
 # --- Commands ---
 function start_recording() {
     if [ -z "$1" ]; then
@@ -149,8 +166,27 @@ function process_recordings() {
                     -map 0:a:0 "$TARGET_DIR/${FINAL_BASENAME}_me.wav" \
                     -map 0:a:1 "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
                     -loglevel error
+                
+                # Verify both WAV files were successfully created before deleting MKV
+                if [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
+                    echo "Audio extraction successful. Verifying file integrity..."
+                    # Check if WAV files have content (not empty)
+                    if [ -s "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
+                        echo "WAV files verified successfully."
+                        safe_delete "$TARGET_DIR/${FINAL_BASENAME}.mkv" "raw recording file"
+                    else
+                        echo "Warning: WAV files are empty. Keeping MKV file for safety."
+                    fi
+                else
+                    echo "Warning: Audio extraction failed. Keeping MKV file for safety."
+                fi
             else
                 echo "Audio tracks already extracted. Skipping ffmpeg."
+                # Check if MKV file exists and WAV files are verified, then delete MKV
+                if [ -f "$TARGET_DIR/${FINAL_BASENAME}.mkv" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
+                    echo "WAV files exist and verified. Cleaning up MKV file..."
+                    safe_delete "$TARGET_DIR/${FINAL_BASENAME}.mkv" "raw recording file"
+                fi
             fi
 
             # --- Transcription ---
@@ -169,11 +205,41 @@ function process_recordings() {
                 echo "Others audio already transcribed. Skipping."
             fi
             
+            # Verify both SRT files were successfully created before deleting WAV files
+            if [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
+                echo "Transcription successful. Verifying SRT file integrity..."
+                # Check if SRT files have content (not empty)
+                if [ -s "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
+                    echo "SRT files verified successfully."
+                    safe_delete "$TARGET_DIR/${FINAL_BASENAME}_me.wav" "audio file (me)"
+                    safe_delete "$TARGET_DIR/${FINAL_BASENAME}_others.wav" "audio file (others)"
+                else
+                    echo "Warning: SRT files are empty. Keeping WAV files for safety."
+                fi
+            else
+                echo "Warning: Transcription failed. Keeping WAV files for safety."
+            fi
+            
             # --- Interleaving ---
             echo "Interleaving transcripts..."
             $PYTHON_CMD "$SCRIPTS_DIR/interleave.py" \
                 "$TARGET_DIR/${FINAL_BASENAME}_me.srt" \
                 "$TARGET_DIR/${FINAL_BASENAME}_others.srt" > "$TARGET_DIR/${FINAL_BASENAME}_transcript.txt"
+            
+            # Verify final transcript file was successfully created before deleting SRT files
+            if [ -f "$TARGET_DIR/${FINAL_BASENAME}_transcript.txt" ]; then
+                echo "Interleaving successful. Verifying final transcript file integrity..."
+                # Check if transcript file has content (not empty)
+                if [ -s "$TARGET_DIR/${FINAL_BASENAME}_transcript.txt" ]; then
+                    echo "Final transcript verified successfully."
+                    safe_delete "$TARGET_DIR/${FINAL_BASENAME}_me.srt" "transcript file (me)"
+                    safe_delete "$TARGET_DIR/${FINAL_BASENAME}_others.srt" "transcript file (others)"
+                else
+                    echo "Warning: Final transcript file is empty. Keeping SRT files for safety."
+                fi
+            else
+                echo "Warning: Interleaving failed. Keeping SRT files for safety."
+            fi
 
             # Update status in the main queue file using a tmp file to be safe
             ESCAPED_PATH=$(printf '%s\n' "$raw_mkv_path" | sed 's:[][\\/.^$*]:\\&:g')
