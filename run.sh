@@ -241,10 +241,11 @@ function process_recordings() {
                 echo "Warning: Interleaving failed. Keeping SRT files for safety."
             fi
 
-            # Update status in the main queue file using a tmp file to be safe
+            # Update status immediately after successful processing (avoiding race condition by using temp file)
+            TEMP_QUEUE_UPDATE=$(mktemp)
             ESCAPED_PATH=$(printf '%s\n' "$raw_mkv_path" | sed 's:[][\\/.^$*]:\\&:g')
-            sed -i.bak "s/$ESCAPED_PATH;$meeting_name;$meeting_date;recorded/$ESCAPED_PATH;$meeting_name;$meeting_date;processed/" "$QUEUE_FILE"
-            rm "$QUEUE_FILE.bak" # Clean up sed backup on macOS
+            sed "s/$ESCAPED_PATH;$meeting_name;$meeting_date;recorded/$ESCAPED_PATH;$meeting_name;$meeting_date;processed/" "$QUEUE_FILE" > "$TEMP_QUEUE_UPDATE"
+            mv "$TEMP_QUEUE_UPDATE" "$QUEUE_FILE"
 
             echo "Processing complete!"
             echo "Final transcript: $TARGET_DIR/${FINAL_BASENAME}_transcript.txt"
