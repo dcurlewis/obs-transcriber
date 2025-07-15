@@ -144,6 +144,9 @@ function process_recordings() {
             echo "Processing: '$meeting_name' from $meeting_date"
             echo "Source file: $raw_mkv_path"
             
+            # Start timing for performance feedback
+            PROCESSING_START=$(date +%s)
+            
             # Create sanitized filename and folder name
             SANITIZED_NAME=$(echo "$meeting_name" | sed 's/[^a-zA-Z0-9]/-/g')
             FINAL_BASENAME="${meeting_date}-${SANITIZED_NAME}"
@@ -161,7 +164,8 @@ function process_recordings() {
 
             # --- Audio Extraction ---
             if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ] || [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
-                echo "Extracting audio tracks with ffmpeg..."
+                echo "⏳ [1/3] Extracting audio tracks with ffmpeg..."
+                AUDIO_START=$(date +%s)
                 # Enhanced ffmpeg command with quality options optimized for speech recognition
                 # - pcm_s16le: High-quality 16-bit PCM codec
                 # - ar 16000: 16kHz sample rate (optimal for speech recognition)
@@ -176,7 +180,9 @@ function process_recordings() {
                 
                 # Verify both WAV files were successfully created before deleting MKV
                 if [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
-                    echo "Audio extraction successful. Verifying file integrity..."
+                    AUDIO_END=$(date +%s)
+                    AUDIO_TIME=$((AUDIO_END - AUDIO_START))
+                    echo "✅ Audio extraction completed in ${AUDIO_TIME}s. Verifying file integrity..."
                     # Check if WAV files have content (not empty)
                     if [ -s "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
                         echo "WAV files verified successfully."
@@ -197,7 +203,21 @@ function process_recordings() {
             fi
 
             # --- Parallel Transcription ---
-            echo "Transcribing audio with Whisper (Model: $WHISPER_MODEL)..."
+            echo "⏳ [2/3] Transcribing audio with Whisper (Model: $WHISPER_MODEL)..."
+            TRANSCRIPTION_START=$(date +%s)
+            
+            # Detect GPU acceleration options for 3-10x speed improvement
+            WHISPER_DEVICE="cpu"  # Default fallback
+            if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
+                WHISPER_DEVICE="cuda"
+                echo "🚀 CUDA GPU detected - using GPU acceleration"
+            elif [[ $(uname -m) == "arm64" ]] && [[ $(uname -s) == "Darwin" ]]; then
+                # Apple Silicon Mac - use MPS (Metal Performance Shaders)
+                WHISPER_DEVICE="mps"
+                echo "🚀 Apple Silicon detected - using MPS GPU acceleration"
+            else
+                echo "ℹ️  Using CPU processing (no compatible GPU found)"
+            fi
             
             # Start both transcriptions in parallel for ~50% speed improvement
             TRANSCRIPTION_PIDS=()
@@ -205,6 +225,7 @@ function process_recordings() {
             if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ]; then
                 echo "Starting transcription: My audio..."
                 whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
+                    --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
                     --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav" &
                 TRANSCRIPTION_PIDS+=($!)
             else
@@ -214,6 +235,7 @@ function process_recordings() {
             if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
                 echo "Starting transcription: Others audio..."
                 whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
+                    --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
                     --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav" &
                 TRANSCRIPTION_PIDS+=($!)
             else
@@ -222,11 +244,13 @@ function process_recordings() {
             
             # Wait for all transcription processes to complete
             if [ ${#TRANSCRIPTION_PIDS[@]} -gt 0 ]; then
-                echo "Waiting for ${#TRANSCRIPTION_PIDS[@]} transcription(s) to complete..."
+                echo "Waiting for ${#TRANSCRIPTION_PIDS[@]} parallel transcription(s) to complete..."
                 for pid in "${TRANSCRIPTION_PIDS[@]}"; do
                     wait "$pid"
                 done
-                echo "All transcriptions completed!"
+                TRANSCRIPTION_END=$(date +%s)
+                TRANSCRIPTION_TIME=$((TRANSCRIPTION_END - TRANSCRIPTION_START))
+                echo "✅ All transcriptions completed in ${TRANSCRIPTION_TIME}s!"
             fi
             
             # Verify both SRT files were successfully created before deleting WAV files
@@ -245,7 +269,8 @@ function process_recordings() {
             fi
             
             # --- Interleaving ---
-            echo "Interleaving transcripts..."
+            echo "⏳ [3/3] Interleaving transcripts..."
+            INTERLEAVE_START=$(date +%s)
             $PYTHON_CMD "$SCRIPTS_DIR/interleave.py" \
                 "$TARGET_DIR/${FINAL_BASENAME}_me.srt" \
                 "$TARGET_DIR/${FINAL_BASENAME}_others.srt" > "$TARGET_DIR/${FINAL_BASENAME}_transcript.txt"
@@ -271,8 +296,21 @@ function process_recordings() {
             sed "s/$ESCAPED_PATH;$meeting_name;$meeting_date;recorded/$ESCAPED_PATH;$meeting_name;$meeting_date;processed/" "$QUEUE_FILE" > "$TEMP_QUEUE_UPDATE"
             mv "$TEMP_QUEUE_UPDATE" "$QUEUE_FILE"
 
-            echo "Processing complete!"
-            echo "Final transcript: $TARGET_DIR/${FINAL_BASENAME}_transcript.txt"
+            # Final processing summary with timing
+            PROCESSING_END=$(date +%s)
+            TOTAL_TIME=$((PROCESSING_END - PROCESSING_START))
+            
+            echo "🎉 Processing complete!"
+            echo "📄 Final transcript: $TARGET_DIR/${FINAL_BASENAME}_transcript.txt"
+            echo "⏱️  Total processing time: ${TOTAL_TIME}s"
+            
+            # Show breakdown if we have all timings
+            if [ -n "${AUDIO_TIME:-}" ] && [ -n "${TRANSCRIPTION_TIME:-}" ]; then
+                INTERLEAVE_TIME=$((PROCESSING_END - INTERLEAVE_START))
+                echo "   ├─ Audio extraction: ${AUDIO_TIME}s"
+                echo "   ├─ Transcription: ${TRANSCRIPTION_TIME}s"
+                echo "   └─ Interleaving: ${INTERLEAVE_TIME}s"
+            fi
         fi
     done < "$TEMP_QUEUE_FILE"
 
