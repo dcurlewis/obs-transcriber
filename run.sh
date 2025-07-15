@@ -242,15 +242,49 @@ function process_recordings() {
                 echo "Others audio already transcribed. Skipping."
             fi
             
-            # Wait for all transcription processes to complete
+            # Wait for all transcription processes to complete with error checking
             if [ ${#TRANSCRIPTION_PIDS[@]} -gt 0 ]; then
                 echo "Waiting for ${#TRANSCRIPTION_PIDS[@]} parallel transcription(s) to complete..."
+                FAILED_PROCESSES=()
                 for pid in "${TRANSCRIPTION_PIDS[@]}"; do
-                    wait "$pid"
+                    if ! wait "$pid"; then
+                        FAILED_PROCESSES+=($pid)
+                    fi
                 done
+                
                 TRANSCRIPTION_END=$(date +%s)
                 TRANSCRIPTION_TIME=$((TRANSCRIPTION_END - TRANSCRIPTION_START))
-                echo "✅ All transcriptions completed in ${TRANSCRIPTION_TIME}s!"
+                
+                if [ ${#FAILED_PROCESSES[@]} -gt 0 ]; then
+                    echo "⚠️  ${#FAILED_PROCESSES[@]} transcription(s) failed, attempting recovery..."
+                    
+                    # Try fallback transcription with CPU and smaller model if GPU was used
+                    if [ "$WHISPER_DEVICE" != "cpu" ]; then
+                        echo "🔄 Retrying with CPU fallback..."
+                        # Retry failed transcriptions with CPU
+                        if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ]; then
+                            whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
+                                --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
+                        fi
+                        if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
+                            whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
+                                --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
+                        fi
+                    fi
+                    
+                    # Check if recovery was successful
+                    if [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
+                        echo "✅ Recovery successful! Transcriptions completed in ${TRANSCRIPTION_TIME}s"
+                    else
+                        echo "❌ Transcription failed even after recovery attempts"
+                        echo "💡 Troubleshooting suggestions:"
+                        echo "   - Check audio file integrity: python scripts/debug_audio.py analyze-wav \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\""
+                        echo "   - Try manual transcription: whisper --model base --device cpu \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\""
+                        echo "   - Check available disk space and memory"
+                    fi
+                else
+                    echo "✅ All transcriptions completed in ${TRANSCRIPTION_TIME}s!"
+                fi
             fi
             
             # Verify both SRT files were successfully created before deleting WAV files
@@ -321,15 +355,82 @@ function process_recordings() {
 
 function show_status() {
     if [ ! -f "$QUEUE_FILE" ]; then
-        echo "Processing queue is empty."
+        echo "📭 Processing queue is empty."
         return
     fi
-    echo "--- Recording Queue Status ---"
-    echo "STATUS      | DATE       | NAME"
-    echo "--------------------------------------------------"
+    
+    echo "📊 Recording Queue Status"
+    echo "═══════════════════════════════════════════════════════════════════════════════"
+    printf "%-12s │ %-10s │ %-20s │ %-10s │ %s\n" "STATUS" "DATE" "NAME" "SIZE" "LOCATION"
+    echo "─────────────┼────────────┼──────────────────────┼────────────┼─────────────────"
+    
+    TOTAL_FILES=0
+    TOTAL_SIZE=0
+    
     while IFS=';' read -r raw_mkv_path meeting_name meeting_date status; do
-        printf "%-11s | %-10s | %s\n" "$status" "$meeting_date" "$meeting_name"
+        TOTAL_FILES=$((TOTAL_FILES + 1))
+        
+        # Determine file location and size based on status
+        if [ "$status" = "recorded" ]; then
+            if [ -f "$raw_mkv_path" ]; then
+                FILE_SIZE=$(stat -f%z "$raw_mkv_path" 2>/dev/null || echo "0")
+                TOTAL_SIZE=$((TOTAL_SIZE + FILE_SIZE))
+                SIZE_MB=$((FILE_SIZE / 1024 / 1024))
+                SIZE_DISPLAY="${SIZE_MB}MB"
+                LOCATION="$(dirname "$raw_mkv_path")"
+            else
+                SIZE_DISPLAY="Missing"
+                LOCATION="Not found"
+            fi
+        elif [ "$status" = "processed" ]; then
+            # Look for processed directory
+            SANITIZED_NAME=$(echo "$meeting_name" | sed 's/[^a-zA-Z0-9]/-/g')
+            PROCESSED_DIR="${RECORDINGS_DIR}/${meeting_date}-${SANITIZED_NAME}"
+            if [ -d "$PROCESSED_DIR" ]; then
+                # Sum up all files in the processed directory
+                DIR_SIZE=$(find "$PROCESSED_DIR" -type f -exec stat -f%z {} \; 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
+                TOTAL_SIZE=$((TOTAL_SIZE + DIR_SIZE))
+                SIZE_MB=$((DIR_SIZE / 1024 / 1024))
+                SIZE_DISPLAY="${SIZE_MB}MB"
+                LOCATION="$PROCESSED_DIR"
+            else
+                SIZE_DISPLAY="Unknown"
+                LOCATION="Processed"
+            fi
+        else
+            SIZE_DISPLAY="N/A"
+            LOCATION="$(dirname "$raw_mkv_path")"
+        fi
+        
+        # Truncate long names for display
+        DISPLAY_NAME="$meeting_name"
+        if [ ${#DISPLAY_NAME} -gt 20 ]; then
+            DISPLAY_NAME="${DISPLAY_NAME:0:17}..."
+        fi
+        
+        # Add status emoji
+        case "$status" in
+            "recorded") STATUS_ICON="⏳ $status" ;;
+            "processed") STATUS_ICON="✅ $status" ;;
+            "discarded") STATUS_ICON="🗑️  $status" ;;
+            *) STATUS_ICON="❓ $status" ;;
+        esac
+        
+        printf "%-12s │ %-10s │ %-20s │ %-10s │ %s\n" "$STATUS_ICON" "$meeting_date" "$DISPLAY_NAME" "$SIZE_DISPLAY" "$(basename "$LOCATION")"
     done < "$QUEUE_FILE"
+    
+    echo "─────────────┴────────────┴──────────────────────┴────────────┴─────────────────"
+    
+    # Summary statistics
+    TOTAL_SIZE_MB=$((TOTAL_SIZE / 1024 / 1024))
+    RECORDED_COUNT=$(grep -c ';recorded$' "$QUEUE_FILE" 2>/dev/null || echo "0")
+    PROCESSED_COUNT=$(grep -c ';processed$' "$QUEUE_FILE" 2>/dev/null || echo "0")
+    
+    echo "📈 Summary: $TOTAL_FILES total recordings │ $RECORDED_COUNT pending │ $PROCESSED_COUNT completed │ ${TOTAL_SIZE_MB}MB total"
+    
+    if [ "$RECORDED_COUNT" -gt 0 ]; then
+        echo "💡 Run './run.sh process' to transcribe pending recordings"
+    fi
 }
 
 function discard_recording() {
