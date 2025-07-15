@@ -368,6 +368,11 @@ function show_status() {
     TOTAL_SIZE=0
     
     while IFS=';' read -r raw_mkv_path meeting_name meeting_date status; do
+        # Skip malformed entries (need at least 4 semicolon-separated fields)
+        if [ -z "$status" ] || [ -z "$meeting_date" ] || [ -z "$meeting_name" ]; then
+            continue
+        fi
+        
         TOTAL_FILES=$((TOTAL_FILES + 1))
         
         # Determine file location and size based on status
@@ -425,6 +430,12 @@ function show_status() {
     TOTAL_SIZE_MB=$((TOTAL_SIZE / 1024 / 1024))
     RECORDED_COUNT=$(grep -c ';recorded$' "$QUEUE_FILE" 2>/dev/null || echo "0")
     PROCESSED_COUNT=$(grep -c ';processed$' "$QUEUE_FILE" 2>/dev/null || echo "0")
+    
+    # Clean up counts (remove any newlines/whitespace) and ensure they're valid integers
+    RECORDED_COUNT=$(echo "$RECORDED_COUNT" | tr -d '\n\r' | grep -o '[0-9]*' | head -1)
+    PROCESSED_COUNT=$(echo "$PROCESSED_COUNT" | tr -d '\n\r' | grep -o '[0-9]*' | head -1)
+    RECORDED_COUNT=${RECORDED_COUNT:-0}
+    PROCESSED_COUNT=${PROCESSED_COUNT:-0}
     
     echo "📈 Summary: $TOTAL_FILES total recordings │ $RECORDED_COUNT pending │ $PROCESSED_COUNT completed │ ${TOTAL_SIZE_MB}MB total"
     
