@@ -98,7 +98,7 @@ function stop_recording() {
     MEETING_DATE=$(tail -n 1 "$PENDING_FILE")
     
     # Give OBS a moment to finalize the file
-    sleep 3 
+    sleep 4 
 
     LATEST_RECORDING=$(find "$RECORDING_PATH" -maxdepth 1 -name "*.mkv" -print0 | xargs -0 ls -t | head -n 1)
 
@@ -162,9 +162,16 @@ function process_recordings() {
             # --- Audio Extraction ---
             if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ] || [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
                 echo "Extracting audio tracks with ffmpeg..."
+                # Enhanced ffmpeg command with quality options optimized for speech recognition
+                # - pcm_s16le: High-quality 16-bit PCM codec
+                # - ar 16000: 16kHz sample rate (optimal for speech recognition)
+                # - ac 1: Convert to mono (often better for speech)
+                # - volume=1.5: Slight volume boost for quiet audio
+                # - highpass/lowpass: Filter for speech frequencies (80Hz-8kHz)
+                # - anlmdn: Noise reduction for "others" track to reduce digital artifacts
                 ffmpeg -i "$TARGET_DIR/${FINAL_BASENAME}.mkv" \
-                    -map 0:a:0 "$TARGET_DIR/${FINAL_BASENAME}_me.wav" \
-                    -map 0:a:1 "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
+                    -map 0:a:0 -af "volume=1.5,highpass=f=80,lowpass=f=8000" -acodec pcm_s16le -ar 16000 -ac 1 "$TARGET_DIR/${FINAL_BASENAME}_me.wav" \
+                    -map 0:a:1 -af "volume=1.5,highpass=f=80,lowpass=f=8000,anlmdn" -acodec pcm_s16le -ar 16000 -ac 1 "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
                     -loglevel error
                 
                 # Verify both WAV files were successfully created before deleting MKV
@@ -189,20 +196,37 @@ function process_recordings() {
                 fi
             fi
 
-            # --- Transcription ---
+            # --- Parallel Transcription ---
             echo "Transcribing audio with Whisper (Model: $WHISPER_MODEL)..."
+            
+            # Start both transcriptions in parallel for ~50% speed improvement
+            TRANSCRIPTION_PIDS=()
+            
             if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ]; then
-                 whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
+                echo "Starting transcription: My audio..."
+                whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
+                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav" &
+                TRANSCRIPTION_PIDS+=($!)
             else
                 echo "My audio already transcribed. Skipping."
             fi
 
             if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
+                echo "Starting transcription: Others audio..."
                 whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
+                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav" &
+                TRANSCRIPTION_PIDS+=($!)
             else
                 echo "Others audio already transcribed. Skipping."
+            fi
+            
+            # Wait for all transcription processes to complete
+            if [ ${#TRANSCRIPTION_PIDS[@]} -gt 0 ]; then
+                echo "Waiting for ${#TRANSCRIPTION_PIDS[@]} transcription(s) to complete..."
+                for pid in "${TRANSCRIPTION_PIDS[@]}"; do
+                    wait "$pid"
+                done
+                echo "All transcriptions completed!"
             fi
             
             # Verify both SRT files were successfully created before deleting WAV files
