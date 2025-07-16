@@ -207,16 +207,47 @@ function process_recordings() {
             TRANSCRIPTION_START=$(date +%s)
             
             # Detect GPU acceleration options for 3-10x speed improvement
-            WHISPER_DEVICE="cpu"  # Default fallback
-            if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
-                WHISPER_DEVICE="cuda"
-                echo "🚀 CUDA GPU detected - using GPU acceleration"
-            elif [[ $(uname -m) == "arm64" ]] && [[ $(uname -s) == "Darwin" ]]; then
-                # Apple Silicon Mac - use MPS (Metal Performance Shaders)
-                WHISPER_DEVICE="mps"
-                echo "🚀 Apple Silicon detected - using MPS GPU acceleration"
+            # Check if user wants to force CPU mode (useful for troubleshooting)
+            if [ "${FORCE_CPU_TRANSCRIPTION:-false}" = "true" ]; then
+                WHISPER_DEVICE="cpu"
+                echo "🔧 FORCE_CPU_TRANSCRIPTION=true - using CPU transcription"
             else
-                echo "ℹ️  Using CPU processing (no compatible GPU found)"
+                WHISPER_DEVICE="cpu"  # Default fallback
+                if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
+                    WHISPER_DEVICE="cuda"
+                    echo "🚀 CUDA GPU detected - testing GPU acceleration..."
+                elif [[ $(uname -m) == "arm64" ]] && [[ $(uname -s) == "Darwin" ]]; then
+                    # Apple Silicon Mac - use MPS (Metal Performance Shaders)
+                    WHISPER_DEVICE="mps"
+                    echo "🚀 Apple Silicon detected - testing MPS GPU acceleration..."
+                else
+                    echo "ℹ️  Using CPU processing (no compatible GPU found)"
+                fi
+            fi
+            
+            # Test GPU compatibility (catches SSL/network issues early)
+            if [ "$WHISPER_DEVICE" != "cpu" ]; then
+                echo "🔍 Testing GPU compatibility and model access..."
+                
+                # Quick test to see if we can load models (catches SSL certificate issues)
+                if timeout 15s python3 -c "
+import whisper
+import warnings
+warnings.filterwarnings('ignore')
+try:
+    # Test model loading - this will fail fast if there are SSL/download issues
+    model = whisper.load_model('base', device='$WHISPER_DEVICE')
+    print('✅ GPU acceleration ready')
+except Exception as e:
+    print(f'❌ GPU test failed: {str(e)[:100]}...')
+    exit(1)
+" 2>/dev/null; then
+                    echo "✅ GPU acceleration confirmed - using $WHISPER_DEVICE device"
+                else
+                    echo "⚠️  GPU test failed (SSL/network/compatibility issue), falling back to CPU"
+                    echo "ℹ️  This is usually due to network restrictions or certificate issues"
+                    WHISPER_DEVICE="cpu"
+                fi
             fi
             
             # Start both transcriptions in parallel for ~50% speed improvement
@@ -252,15 +283,14 @@ function process_recordings() {
                     fi
                 done
                 
-                TRANSCRIPTION_END=$(date +%s)
-                TRANSCRIPTION_TIME=$((TRANSCRIPTION_END - TRANSCRIPTION_START))
-                
                 if [ ${#FAILED_PROCESSES[@]} -gt 0 ]; then
                     echo "⚠️  ${#FAILED_PROCESSES[@]} transcription(s) failed, attempting recovery..."
                     
                     # Try fallback transcription with CPU and smaller model if GPU was used
                     if [ "$WHISPER_DEVICE" != "cpu" ]; then
                         echo "🔄 Retrying with CPU fallback..."
+                        RETRY_START=$(date +%s)
+                        
                         # Retry failed transcriptions with CPU
                         if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ]; then
                             whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
@@ -270,6 +300,9 @@ function process_recordings() {
                             whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
                                 --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
                         fi
+                        
+                        RETRY_END=$(date +%s)
+                        TRANSCRIPTION_TIME=$((RETRY_END - RETRY_START))
                     fi
                     
                     # Check if recovery was successful
@@ -283,6 +316,8 @@ function process_recordings() {
                         echo "   - Check available disk space and memory"
                     fi
                 else
+                    TRANSCRIPTION_END=$(date +%s)
+                    TRANSCRIPTION_TIME=$((TRANSCRIPTION_END - TRANSCRIPTION_START))
                     echo "✅ All transcriptions completed in ${TRANSCRIPTION_TIME}s!"
                 fi
             fi
