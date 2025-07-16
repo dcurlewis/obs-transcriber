@@ -255,9 +255,16 @@ except Exception as e:
             
             if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ]; then
                 echo "Starting transcription: My audio..."
-                whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                    --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
-                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav" &
+                # Add SSL bypass if user requested it via environment variable
+                if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
+                    PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
+                        --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
+                        --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav" &
+                else
+                    whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
+                        --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
+                        --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav" &
+                fi
                 TRANSCRIPTION_PIDS+=($!)
             else
                 echo "My audio already transcribed. Skipping."
@@ -265,9 +272,16 @@ except Exception as e:
 
             if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
                 echo "Starting transcription: Others audio..."
-                whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                    --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
-                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav" &
+                # Add SSL bypass if user requested it via environment variable
+                if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
+                    PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
+                        --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
+                        --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav" &
+                else
+                    whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
+                        --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
+                        --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav" &
+                fi
                 TRANSCRIPTION_PIDS+=($!)
             else
                 echo "Others audio already transcribed. Skipping."
@@ -293,12 +307,22 @@ except Exception as e:
                         
                         # Retry failed transcriptions with CPU
                         if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ]; then
-                            whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
-                                --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
+                            if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
+                                PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
+                                    --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
+                            else
+                                whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
+                                    --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
+                            fi
                         fi
                         if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
-                            whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
-                                --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
+                            if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
+                                PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
+                                    --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
+                            else
+                                whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
+                                    --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
+                            fi
                         fi
                         
                         RETRY_END=$(date +%s)
