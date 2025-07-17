@@ -6,8 +6,10 @@ A set of scripts to automate the recording, transcription, and processing of mul
 
 - **CLI Control**: Easily start, stop, and process recordings from the command line.
 - **Speaker Separation**: Automatically separates your audio from other participants' audio.
-- **Accurate Transcription**: Utilizes OpenAI's Whisper for high-quality speech-to-text.
-- **Interleaved Transcripts**: Merges separate transcripts into a single, chronologically-ordered file with speaker labels (`Me:` and `Others:`).
+- **Speaker Diarization**: Identifies and labels different speakers in the "Others" track.
+- **Accurate Transcription**: Utilizes OpenAI's Whisper for high-quality speech-to-text with audio normalization.
+- **Hallucination Filtering**: Removes common transcription artifacts and hallucinations.
+- **Interleaved Transcripts**: Merges separate transcripts into a single, chronologically-ordered file with clear speaker labels.
 - **Organized Files**: Manages recordings and transcripts in a clean, timestamped folder structure for easy access.
 
 ## Prerequisites
@@ -38,6 +40,12 @@ Before you begin, ensure you have the following installed:
     pip install -r requirements.txt
     ```
     *Note: You will need to activate the virtual environment (`source venv/bin/activate`) in each new terminal session before running the scripts.*
+
+6.  **Speaker Diarization Setup (Optional)**:
+    - For speaker diarization, you need a Hugging Face account and access token
+    - Visit https://huggingface.co/pyannote/speaker-diarization and accept the terms
+    - Get your access token from https://huggingface.co/settings/tokens
+    - Use your token when prompted during the first diarization run
 
 
 ## Setup
@@ -73,6 +81,10 @@ Before you begin, ensure you have the following installed:
     [WHISPER]
     MODEL=base
     LANGUAGE=en
+    # Set to true to bypass SSL verification if you have network certificate issues
+    WHISPER_IGNORE_SSL=false
+    # Set to true to force CPU-only transcription (useful for troubleshooting)
+    FORCE_CPU_TRANSCRIPTION=false
 
     [PATHS]
     # This should be the same as the "Recording Path" in your OBS settings
@@ -127,8 +139,30 @@ The main script `run.sh` provides all the necessary commands:
 │       ├── 20231027-My-Meeting_others.srt
 │       └── 20231027-My-Meeting_transcript.txt
 ├── scripts/              # All executable scripts
-│   ├── obs_controller.py
-│   ├── process_audio.py
-│   └── interleave.py
+│   ├── obs_controller.py        # Controls OBS recording via WebSocket
+│   ├── interleave.py            # Merges transcripts with timestamps
+│   ├── filter_hallucinations.py # Removes transcription artifacts
+│   └── speaker_diarization.py   # Identifies different speakers
 └── run.sh                # Main CLI entrypoint
-``` 
+```
+
+## Recent Improvements
+
+The following enhancements have been made to improve the quality and usefulness of transcriptions:
+
+### Audio Processing
+- **Dynamic Audio Normalization**: The system now applies dynamic audio normalization for consistent volume levels, significantly improving transcription accuracy for quiet or distant speakers.
+- **Optimized Speech Filters**: Audio is filtered to focus on speech frequencies (80Hz-8kHz) for cleaner transcriptions.
+
+### Speaker Identification
+- **Speaker Diarization**: The system now identifies different speakers in the "Others" audio track and labels them as "Speaker 1", "Speaker 2", etc., making it much easier to follow conversations in the transcript.
+- **Label Preservation**: Speaker labels are preserved throughout the processing pipeline and reflected in the final transcript.
+
+### Error Handling
+- **Improved Troubleshooting**: Better error messages and recovery options for failed transcriptions.
+- **Robust File Processing**: Added safety checks to prevent data loss when processing audio files.
+- **Hallucination Filtering**: Automatic removal of common transcription artifacts and "hallucinations" (like repeated "Thank you" phrases during silence).
+
+### GPU Acceleration
+- **Automatic GPU Detection**: The system automatically detects and uses CUDA or Apple Silicon GPU acceleration when available.
+- **Configurable Fallbacks**: Added options to force CPU processing for troubleshooting on systems with GPU compatibility issues.
