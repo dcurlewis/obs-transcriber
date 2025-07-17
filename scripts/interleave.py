@@ -1,5 +1,6 @@
 import srt
 import sys
+import re
 from datetime import timedelta
 
 def main():
@@ -18,8 +19,19 @@ def main():
 
         with open(others_srt_file, 'r', encoding='utf-8') as f:
             other_subs = list(srt.parse(f.read()))
+        
+        # Process others' subtitles to extract speaker info from diarization
         for sub in other_subs:
-            sub.speaker = "Others"
+            # Look for speaker labels like "[Speaker 1]" at the start of content
+            speaker_match = re.match(r'^\[(Speaker \d+)\]\s+(.*)', sub.content.strip())
+            if speaker_match:
+                # Extract the speaker label and the actual content
+                speaker_label = speaker_match.group(1)
+                content = speaker_match.group(2)
+                sub.speaker = speaker_label
+                sub.content = content
+            else:
+                sub.speaker = "Others"
 
     except FileNotFoundError as e:
         print(f"Error: {e.filename} not found.")

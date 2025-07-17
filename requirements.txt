@@ -1,0 +1,6 @@
+openai-whisper
+obsws-python
+srt
+python-dotenv
+pyannote.audio>=2.1.0
+torch>=1.9.0 

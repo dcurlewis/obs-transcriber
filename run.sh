@@ -363,6 +363,25 @@ except Exception as e:
                 if [ -s "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
                     echo "SRT files verified successfully."
                     
+                    # Apply speaker diarization to the 'Others' track
+                    if [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
+                        echo "🎙️ Adding speaker diarization to 'Others' audio..."
+                        $PYTHON_CMD "$SCRIPTS_DIR/speaker_diarization.py" \
+                            "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
+                            "$TARGET_DIR/${FINAL_BASENAME}_others.srt" \
+                            "$TARGET_DIR/${FINAL_BASENAME}_others_diarized.srt"
+                        
+                        # Replace original SRT with diarized version if successful
+                        if [ -f "$TARGET_DIR/${FINAL_BASENAME}_others_diarized.srt" ]; then
+                            mv "$TARGET_DIR/${FINAL_BASENAME}_others_diarized.srt" "$TARGET_DIR/${FINAL_BASENAME}_others.srt"
+                            echo "✅ Speaker diarization completed"
+                        else
+                            echo "⚠️ Speaker diarization failed, keeping original transcript"
+                        fi
+                    else
+                        echo "⚠️ Cannot perform speaker diarization: audio file not found"
+                    fi
+                    
                     # Filter hallucinations from transcription files
                     echo "🧹 Filtering hallucinations from transcripts..."
                     $PYTHON_CMD "$SCRIPTS_DIR/filter_hallucinations.py" "$TARGET_DIR/${FINAL_BASENAME}_me.srt" "$TARGET_DIR/${FINAL_BASENAME}_me_clean.srt"
