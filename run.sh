@@ -63,10 +63,17 @@ function safe_delete() {
 # --- Commands ---
 function start_recording() {
     if [ -z "$1" ]; then
-        echo "Usage: $0 start \"<Meeting Name>\""
-        exit 1
+        echo "Enter meeting name:"
+        read -r MEETING_NAME
+        
+        # Validate that user entered something
+        if [ -z "$MEETING_NAME" ]; then
+            echo "Error: Meeting name cannot be empty."
+            exit 1
+        fi
+    else
+        MEETING_NAME=$1
     fi
-    MEETING_NAME=$1
 
     if [ -f "$PENDING_FILE" ]; then
         LAST_MEETING=$(head -n 1 "$PENDING_FILE")
@@ -170,12 +177,11 @@ function process_recordings() {
                 # - pcm_s16le: High-quality 16-bit PCM codec
                 # - ar 16000: 16kHz sample rate (optimal for speech recognition)
                 # - ac 1: Convert to mono (often better for speech)
-                # - volume=1.5: Slight volume boost for quiet audio
+                # - dynaudnorm: Dynamic audio normalizer to ensure consistent levels
                 # - highpass/lowpass: Filter for speech frequencies (80Hz-8kHz)
-                # - anlmdn: Noise reduction for "others" track to reduce digital artifacts
                 ffmpeg -i "$TARGET_DIR/${FINAL_BASENAME}.mkv" \
-                    -map 0:a:0 -af "volume=1.5,highpass=f=80,lowpass=f=8000" -acodec pcm_s16le -ar 16000 -ac 1 "$TARGET_DIR/${FINAL_BASENAME}_me.wav" \
-                    -map 0:a:1 -af "volume=1.5,highpass=f=80,lowpass=f=8000,anlmdn" -acodec pcm_s16le -ar 16000 -ac 1 "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
+                    -map 0:a:0 -af "dynaudnorm=f=150:g=15:p=0.75,highpass=f=80,lowpass=f=8000" -acodec pcm_s16le -ar 16000 -ac 1 "$TARGET_DIR/${FINAL_BASENAME}_me.wav" \
+                    -map 0:a:1 -af "dynaudnorm=f=150:g=15:p=0.75,highpass=f=80,lowpass=f=8000" -acodec pcm_s16le -ar 16000 -ac 1 "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
                     -loglevel error
                 
                 # Verify both WAV files were successfully created before deleting MKV
@@ -258,11 +264,11 @@ except Exception as e:
                 # Add SSL bypass if user requested it via environment variable
                 if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
                     PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                        --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
+                        --device "$WHISPER_DEVICE" --condition_on_previous_text False --no_speech_threshold 0.8 \
                         --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav" &
                 else
                     whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                        --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
+                        --device "$WHISPER_DEVICE" --condition_on_previous_text False --no_speech_threshold 0.8 \
                         --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav" &
                 fi
                 TRANSCRIPTION_PIDS+=($!)
@@ -275,11 +281,11 @@ except Exception as e:
                 # Add SSL bypass if user requested it via environment variable
                 if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
                     PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                        --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
+                        --device "$WHISPER_DEVICE" --condition_on_previous_text False --no_speech_threshold 0.8 \
                         --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav" &
                 else
                     whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                        --device "$WHISPER_DEVICE" --word_timestamps True --highlight_words True \
+                        --device "$WHISPER_DEVICE" --condition_on_previous_text False --no_speech_threshold 0.8 \
                         --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav" &
                 fi
                 TRANSCRIPTION_PIDS+=($!)
@@ -309,19 +315,23 @@ except Exception as e:
                         if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ]; then
                             if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
                                 PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
-                                    --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
+                                    --device cpu --condition_on_previous_text False --no_speech_threshold 0.8 \
+                                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
                             else
                                 whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
-                                    --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
+                                    --device cpu --condition_on_previous_text False --no_speech_threshold 0.8 \
+                                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
                             fi
                         fi
                         if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
                             if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
                                 PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
-                                    --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
+                                    --device cpu --condition_on_previous_text False --no_speech_threshold 0.8 \
+                                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
                             else
                                 whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
-                                    --device cpu --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
+                                    --device cpu --condition_on_previous_text False --no_speech_threshold 0.8 \
+                                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
                             fi
                         fi
                         
@@ -335,7 +345,7 @@ except Exception as e:
                     else
                         echo "❌ Transcription failed even after recovery attempts"
                         echo "💡 Troubleshooting suggestions:"
-                        echo "   - Check audio file integrity: python scripts/debug_audio.py analyze-wav \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\""
+                        echo "   - Check audio file integrity: ffmpeg -i \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\" -f null -"
                         echo "   - Try manual transcription: whisper --model base --device cpu \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\""
                         echo "   - Check available disk space and memory"
                     fi
@@ -352,6 +362,21 @@ except Exception as e:
                 # Check if SRT files have content (not empty)
                 if [ -s "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
                     echo "SRT files verified successfully."
+                    
+                    # Filter hallucinations from transcription files
+                    echo "🧹 Filtering hallucinations from transcripts..."
+                    $PYTHON_CMD "$SCRIPTS_DIR/filter_hallucinations.py" "$TARGET_DIR/${FINAL_BASENAME}_me.srt" "$TARGET_DIR/${FINAL_BASENAME}_me_clean.srt"
+                    $PYTHON_CMD "$SCRIPTS_DIR/filter_hallucinations.py" "$TARGET_DIR/${FINAL_BASENAME}_others.srt" "$TARGET_DIR/${FINAL_BASENAME}_others_clean.srt"
+                    
+                    # Replace original SRT files with filtered versions if filtering succeeded
+                    if [ -f "$TARGET_DIR/${FINAL_BASENAME}_me_clean.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others_clean.srt" ]; then
+                        mv "$TARGET_DIR/${FINAL_BASENAME}_me_clean.srt" "$TARGET_DIR/${FINAL_BASENAME}_me.srt"
+                        mv "$TARGET_DIR/${FINAL_BASENAME}_others_clean.srt" "$TARGET_DIR/${FINAL_BASENAME}_others.srt"
+                        echo "✅ Hallucination filtering completed"
+                    else
+                        echo "⚠️  Hallucination filtering failed, keeping original SRT files"
+                    fi
+                    
                     safe_delete "$TARGET_DIR/${FINAL_BASENAME}_me.wav" "audio file (me)"
                     safe_delete "$TARGET_DIR/${FINAL_BASENAME}_others.wav" "audio file (others)"
                 else
@@ -428,7 +453,15 @@ function show_status() {
     
     while IFS=';' read -r raw_mkv_path meeting_name meeting_date status; do
         # Skip malformed entries (need at least 4 semicolon-separated fields)
-        if [ -z "$status" ] || [ -z "$meeting_date" ] || [ -z "$meeting_name" ]; then
+        if [ -z "$status" ] || [ -z "$meeting_date" ] || [ -z "$meeting_name" ] || [ -z "$raw_mkv_path" ]; then
+            echo "⚠️  Skipping malformed entry: $raw_mkv_path;$meeting_name;$meeting_date;$status" >&2
+            continue
+        fi
+        
+        # Skip entries with too many fields (corrupted data)
+        FIELD_COUNT=$(echo "$raw_mkv_path;$meeting_name;$meeting_date;$status" | tr -cd ';' | wc -c)
+        if [ "$FIELD_COUNT" -gt 3 ]; then
+            echo "⚠️  Skipping corrupted entry with too many fields" >&2
             continue
         fi
         
@@ -466,8 +499,10 @@ function show_status() {
             LOCATION="$(dirname "$raw_mkv_path")"
         fi
         
-        # Truncate long names for display
+        # Truncate long names for display and handle special characters
         DISPLAY_NAME="$meeting_name"
+        # Remove any embedded newlines or control characters
+        DISPLAY_NAME=$(echo "$DISPLAY_NAME" | tr -d '\n\r' | tr -c '[:print:]' '?')
         if [ ${#DISPLAY_NAME} -gt 20 ]; then
             DISPLAY_NAME="${DISPLAY_NAME:0:17}..."
         fi
