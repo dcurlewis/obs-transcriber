@@ -5,6 +5,7 @@ set -e
 
 # --- Configuration ---
 # Source environment variables from .env file if it exists
+# You can set KEEP_RAW_RECORDING=true, FORCE_CPU_TRANSCRIPTION=true, WHISPER_IGNORE_SSL=true, etc.
 if [ -f .env ]; then
     # Using a simple source command which is more robust than the previous sed/xargs combo
     set -o allexport; source .env; set +o allexport
@@ -16,6 +17,8 @@ WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-en}
 # Use PWD for recordings path if not set, replacing ~ with $HOME
 RECORDING_PATH_RAW=${RECORDING_PATH:-.}
 RECORDING_PATH="${RECORDING_PATH_RAW/\~/$HOME}"
+# Option to retain raw MKV files for troubleshooting (default: false)
+KEEP_RAW_RECORDING=${KEEP_RAW_RECORDING:-false}
 
 # --- Setup Python Command ---
 # Prioritize using a project-local virtual environment if it exists.
@@ -143,6 +146,9 @@ function process_recordings() {
     # Use a temporary file for safe iteration and modification
     TEMP_QUEUE_FILE=$(mktemp)
     cp "$QUEUE_FILE" "$TEMP_QUEUE_FILE"
+    
+    # Track which recordings were successfully processed
+    PROCESSED_RECORDINGS=()
 
     # Process each 'recorded' entry
     while IFS=';' read -r raw_mkv_path meeting_name meeting_date status; do
@@ -165,8 +171,14 @@ function process_recordings() {
             if [ -f "$raw_mkv_path" ]; then
                 echo "Moving source file to target directory..."
                 mv "$raw_mkv_path" "$TARGET_DIR/${FINAL_BASENAME}.mkv"
-            else
+            elif [ -f "$TARGET_DIR/${FINAL_BASENAME}.mkv" ]; then
                 echo "Source file already moved. Skipping move."
+            else
+                echo "❌ Error: Source file not found and target file doesn't exist!"
+                echo "   Expected source: $raw_mkv_path"
+                echo "   Expected target: $TARGET_DIR/${FINAL_BASENAME}.mkv"
+                echo "   Skipping this recording."
+                continue
             fi
 
             # --- Audio Extraction ---
@@ -192,7 +204,11 @@ function process_recordings() {
                     # Check if WAV files have content (not empty)
                     if [ -s "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
                         echo "WAV files verified successfully."
-                        safe_delete "$TARGET_DIR/${FINAL_BASENAME}.mkv" "raw recording file"
+                        if [ "${KEEP_RAW_RECORDING}" = "true" ]; then
+                            echo "🗂️  Keeping raw MKV file for troubleshooting (KEEP_RAW_RECORDING=true)"
+                        else
+                            safe_delete "$TARGET_DIR/${FINAL_BASENAME}.mkv" "raw recording file"
+                        fi
                     else
                         echo "Warning: WAV files are empty. Keeping MKV file for safety."
                     fi
@@ -203,8 +219,12 @@ function process_recordings() {
                 echo "Audio tracks already extracted. Skipping ffmpeg."
                 # Check if MKV file exists and WAV files are verified, then delete MKV
                 if [ -f "$TARGET_DIR/${FINAL_BASENAME}.mkv" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
-                    echo "WAV files exist and verified. Cleaning up MKV file..."
-                    safe_delete "$TARGET_DIR/${FINAL_BASENAME}.mkv" "raw recording file"
+                    if [ "${KEEP_RAW_RECORDING}" = "true" ]; then
+                        echo "🗂️  Raw MKV file exists and keeping for troubleshooting (KEEP_RAW_RECORDING=true)"
+                    else
+                        echo "WAV files exist and verified. Cleaning up MKV file..."
+                        safe_delete "$TARGET_DIR/${FINAL_BASENAME}.mkv" "raw recording file"
+                    fi
                 fi
             fi
 
@@ -363,24 +383,6 @@ except Exception as e:
                 if [ -s "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -s "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
                     echo "SRT files verified successfully."
                     
-                    # Apply speaker diarization to the 'Others' track
-                    if [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
-                        echo "🎙️ Adding speaker diarization to 'Others' audio..."
-                        $PYTHON_CMD "$SCRIPTS_DIR/speaker_diarization.py" \
-                            "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
-                            "$TARGET_DIR/${FINAL_BASENAME}_others.srt" \
-                            "$TARGET_DIR/${FINAL_BASENAME}_others_diarized.srt"
-                        
-                        # Replace original SRT with diarized version if successful
-                        if [ -f "$TARGET_DIR/${FINAL_BASENAME}_others_diarized.srt" ]; then
-                            mv "$TARGET_DIR/${FINAL_BASENAME}_others_diarized.srt" "$TARGET_DIR/${FINAL_BASENAME}_others.srt"
-                            echo "✅ Speaker diarization completed"
-                        else
-                            echo "⚠️ Speaker diarization failed, keeping original transcript"
-                        fi
-                    else
-                        echo "⚠️ Cannot perform speaker diarization: audio file not found"
-                    fi
                     
                     # Filter hallucinations from transcription files
                     echo "🧹 Filtering hallucinations from transcripts..."
@@ -427,11 +429,8 @@ except Exception as e:
                 echo "Warning: Interleaving failed. Keeping SRT files for safety."
             fi
 
-            # Update status immediately after successful processing (avoiding race condition by using temp file)
-            TEMP_QUEUE_UPDATE=$(mktemp)
-            ESCAPED_PATH=$(printf '%s\n' "$raw_mkv_path" | sed 's:[][\\/.^$*]:\\&:g')
-            sed "s/$ESCAPED_PATH;$meeting_name;$meeting_date;recorded/$ESCAPED_PATH;$meeting_name;$meeting_date;processed/" "$QUEUE_FILE" > "$TEMP_QUEUE_UPDATE"
-            mv "$TEMP_QUEUE_UPDATE" "$QUEUE_FILE"
+            # Mark this recording as successfully processed (defer CSV update until after loop)
+            PROCESSED_RECORDINGS+=("$raw_mkv_path;$meeting_name;$meeting_date")
 
             # Final processing summary with timing
             PROCESSING_END=$(date +%s)
@@ -452,6 +451,26 @@ except Exception as e:
     done < "$TEMP_QUEUE_FILE"
 
     rm "$TEMP_QUEUE_FILE"
+    
+    # Now update the CSV file for all successfully processed recordings
+    if [ ${#PROCESSED_RECORDINGS[@]} -gt 0 ]; then
+        TEMP_QUEUE_UPDATE=$(mktemp)
+        cp "$QUEUE_FILE" "$TEMP_QUEUE_UPDATE"
+        
+        for recording_info in "${PROCESSED_RECORDINGS[@]}"; do
+            # Split the recording info back into components
+            IFS=';' read -r path name date <<< "$recording_info"
+            # Use awk for safe CSV field updating
+            awk -F';' -v path="$path" -v name="$name" -v date="$date" \
+                'BEGIN {OFS=";"} 
+                 $1 == path && $2 == name && $3 == date && $4 == "recorded" {$4 = "processed"} 
+                 {print}' "$TEMP_QUEUE_UPDATE" > "$TEMP_QUEUE_UPDATE.new"
+            mv "$TEMP_QUEUE_UPDATE.new" "$TEMP_QUEUE_UPDATE"
+        done
+        
+        mv "$TEMP_QUEUE_UPDATE" "$QUEUE_FILE"
+    fi
+    
     echo "-----------------------------------------------------"
     echo "All recordings processed."
 }
@@ -637,6 +656,11 @@ function discard_recording() {
 # --- Main Logic ---
 if [ -z "$1" ]; then
     echo "Usage: $0 <start|stop|process|status|discard> [args]"
+    echo ""
+    echo "Environment Variables:"
+    echo "  KEEP_RAW_RECORDING=true    Retain raw MKV files for troubleshooting (default: false)"
+    echo "  FORCE_CPU_TRANSCRIPTION=true    Force CPU transcription (default: false)"
+    echo "  WHISPER_IGNORE_SSL=true    Bypass SSL verification for Whisper (default: false)"
     exit 1
 fi
 
