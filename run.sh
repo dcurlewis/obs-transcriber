@@ -576,6 +576,39 @@ function show_status() {
     fi
 }
 
+function abort_recording() {
+    # Abort an active recording without adding it to the processing queue
+    if [ ! -f "$PENDING_FILE" ]; then
+        echo "Error: No active recording found."
+        echo "Use '$0 start \"<name>\"' to begin a recording."
+        exit 1
+    fi
+    
+    MEETING_NAME=$(head -n 1 "$PENDING_FILE")
+    echo "Aborting recording for: $MEETING_NAME"
+    
+    # Stop the recording
+    $PYTHON_CMD "$SCRIPTS_DIR/obs_controller.py" stop
+    
+    # Give OBS a moment to finalize the file
+    sleep 3
+    
+    # Find and delete the most recent recording
+    LATEST_RECORDING=$(find "$RECORDING_PATH" -maxdepth 1 -name "*.mkv" -print0 | xargs -0 ls -t | head -n 1)
+    
+    if [ -n "$LATEST_RECORDING" ] && [ -f "$LATEST_RECORDING" ]; then
+        echo "Deleting recording file: $LATEST_RECORDING"
+        rm "$LATEST_RECORDING"
+        echo "Recording file deleted successfully."
+    else
+        echo "Warning: Could not find recording file to delete."
+    fi
+    
+    # Clean up the pending file
+    rm "$PENDING_FILE"
+    echo "Recording for '$MEETING_NAME' has been aborted."
+}
+
 function discard_recording() {
     # Case 1: A recording is currently in progress and needs to be cancelled.
     if [ -f "$PENDING_FILE" ]; then
@@ -655,7 +688,15 @@ function discard_recording() {
 
 # --- Main Logic ---
 if [ -z "$1" ]; then
-    echo "Usage: $0 <start|stop|process|status|discard> [args]"
+    echo "Usage: $0 <start|stop|abort|process|status|discard> [args]"
+    echo ""
+    echo "Commands:"
+    echo "  start <name>  - Start recording with the given meeting name"
+    echo "  stop          - Stop recording and add to processing queue"
+    echo "  abort         - Cancel active recording without saving"
+    echo "  process       - Process all queued recordings"
+    echo "  status        - Show recording queue status"
+    echo "  discard       - Discard recordings (with confirmation)"
     echo ""
     echo "Environment Variables:"
     echo "  KEEP_RAW_RECORDING=true    Retain raw MKV files for troubleshooting (default: false)"
@@ -676,6 +717,9 @@ case $COMMAND in
         ;;
     stop)
         stop_recording
+        ;;
+    abort)
+        abort_recording
         ;;
     process)
         process_recordings
