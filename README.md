@@ -106,6 +106,15 @@ The main script `run.sh` provides all the necessary commands:
     ```
     This will stop the recording and add it to the processing queue.
 
+-   **Abort Recording** (Cancel without saving):
+    ```bash
+    ./run.sh abort
+    ```
+    This immediately cancels an active recording without any confirmation prompts. The recording file is deleted and nothing is added to the processing queue. Useful for:
+    - Accidentally starting a recording
+    - Meetings that are cancelled after recording starts
+    - Test recordings you don't want to keep
+
 -   **Process All Pending Recordings**:
     ```bash
     ./run.sh process
@@ -118,11 +127,14 @@ The main script `run.sh` provides all the necessary commands:
     ```
     This shows all recorded meetings and their current processing status.
 
--   **Discard a Recording**:
+-   **Discard a Recording** (with confirmation):
     ```bash
     ./run.sh discard
     ```
-    If a recording is in progress, this will stop and delete it. Otherwise, it will present a menu of queued recordings to discard.
+    If a recording is in progress, this will ask for confirmation before stopping and deleting it. Otherwise, it will present an interactive menu of queued recordings to discard. Unlike `abort`, this command:
+    - Always asks for confirmation before deleting
+    - Can remove recordings from the queue after they've been stopped
+    - Marks discarded recordings in the processing queue for audit purposes
 
 ## Project Structure
 
