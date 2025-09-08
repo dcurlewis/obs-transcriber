@@ -34,7 +34,10 @@ fi
 PENDING_FILE=".pending_meeting"
 QUEUE_FILE="processing_queue.csv"
 SCRIPTS_DIR="scripts"
-RECORDINGS_DIR="recordings"
+# Use TRANSCRIPTION_OUTPUT_DIR from .env, default to "recordings" if not set
+TRANSCRIPTION_OUTPUT_DIR_RAW=${TRANSCRIPTION_OUTPUT_DIR:-recordings}
+# Replace ~ with $HOME in the path
+RECORDINGS_DIR="${TRANSCRIPTION_OUTPUT_DIR_RAW/\~/$HOME}"
 
 # --- Helper Functions ---
 function check_deps() {
@@ -142,6 +145,13 @@ function process_recordings() {
     fi
 
     echo "Found $UNPROCESSED_COUNT recordings to process..."
+    echo "📁 Transcriptions will be saved to: $RECORDINGS_DIR"
+    
+    # Ensure the recordings directory exists
+    if [ ! -d "$RECORDINGS_DIR" ]; then
+        echo "Creating transcription output directory: $RECORDINGS_DIR"
+        mkdir -p "$RECORDINGS_DIR"
+    fi
     
     # Use a temporary file for safe iteration and modification
     TEMP_QUEUE_FILE=$(mktemp)
@@ -410,18 +420,29 @@ except Exception as e:
             # --- Interleaving ---
             echo "⏳ [3/3] Interleaving transcripts..."
             INTERLEAVE_START=$(date +%s)
+            # Save transcript directly to the configured directory
+            FINAL_TRANSCRIPT_PATH="$RECORDINGS_DIR/${FINAL_BASENAME}_transcript.txt"
             $PYTHON_CMD "$SCRIPTS_DIR/interleave.py" \
                 "$TARGET_DIR/${FINAL_BASENAME}_me.srt" \
-                "$TARGET_DIR/${FINAL_BASENAME}_others.srt" > "$TARGET_DIR/${FINAL_BASENAME}_transcript.txt"
+                "$TARGET_DIR/${FINAL_BASENAME}_others.srt" > "$FINAL_TRANSCRIPT_PATH"
             
             # Verify final transcript file was successfully created before deleting SRT files
-            if [ -f "$TARGET_DIR/${FINAL_BASENAME}_transcript.txt" ]; then
+            if [ -f "$FINAL_TRANSCRIPT_PATH" ]; then
                 echo "Interleaving successful. Verifying final transcript file integrity..."
                 # Check if transcript file has content (not empty)
-                if [ -s "$TARGET_DIR/${FINAL_BASENAME}_transcript.txt" ]; then
+                if [ -s "$FINAL_TRANSCRIPT_PATH" ]; then
                     echo "Final transcript verified successfully."
                     safe_delete "$TARGET_DIR/${FINAL_BASENAME}_me.srt" "transcript file (me)"
                     safe_delete "$TARGET_DIR/${FINAL_BASENAME}_others.srt" "transcript file (others)"
+                    
+                    # Clean up the temporary directory if it's empty (no raw recording kept)
+                    if [ "${KEEP_RAW_RECORDING}" != "true" ]; then
+                        # Check if directory is empty
+                        if [ -z "$(ls -A "$TARGET_DIR" 2>/dev/null)" ]; then
+                            echo "Removing empty temporary directory: $TARGET_DIR"
+                            rmdir "$TARGET_DIR"
+                        fi
+                    fi
                 else
                     echo "Warning: Final transcript file is empty. Keeping SRT files for safety."
                 fi
@@ -437,7 +458,7 @@ except Exception as e:
             TOTAL_TIME=$((PROCESSING_END - PROCESSING_START))
             
             echo "🎉 Processing complete!"
-            echo "📄 Final transcript: $TARGET_DIR/${FINAL_BASENAME}_transcript.txt"
+            echo "📄 Final transcript: $FINAL_TRANSCRIPT_PATH"
             echo "⏱️  Total processing time: ${TOTAL_TIME}s"
             
             # Show breakdown if we have all timings
@@ -518,16 +539,23 @@ function show_status() {
                 LOCATION="Not found"
             fi
         elif [ "$status" = "processed" ]; then
-            # Look for processed directory
+            # Look for processed transcript file
             SANITIZED_NAME=$(echo "$meeting_name" | sed 's/[^a-zA-Z0-9]/-/g')
-            PROCESSED_DIR="${RECORDINGS_DIR}/${meeting_date}-${SANITIZED_NAME}"
-            if [ -d "$PROCESSED_DIR" ]; then
-                # Sum up all files in the processed directory
-                DIR_SIZE=$(find "$PROCESSED_DIR" -type f -exec stat -f%z {} \; 2>/dev/null | awk '{sum+=$1} END {print sum+0}')
-                TOTAL_SIZE=$((TOTAL_SIZE + DIR_SIZE))
-                SIZE_MB=$((DIR_SIZE / 1024 / 1024))
-                SIZE_DISPLAY="${SIZE_MB}MB"
-                LOCATION="$PROCESSED_DIR"
+            FINAL_BASENAME="${meeting_date}-${SANITIZED_NAME}"
+            TRANSCRIPT_FILE="${RECORDINGS_DIR}/${FINAL_BASENAME}_transcript.txt"
+            if [ -f "$TRANSCRIPT_FILE" ]; then
+                # Get size of transcript file
+                FILE_SIZE=$(stat -f%z "$TRANSCRIPT_FILE" 2>/dev/null || echo "0")
+                TOTAL_SIZE=$((TOTAL_SIZE + FILE_SIZE))
+                SIZE_MB=$((FILE_SIZE / 1024 / 1024))
+                if [ "$SIZE_MB" -eq 0 ]; then
+                    # Show size in KB for small files
+                    SIZE_KB=$((FILE_SIZE / 1024))
+                    SIZE_DISPLAY="${SIZE_KB}KB"
+                else
+                    SIZE_DISPLAY="${SIZE_MB}MB"
+                fi
+                LOCATION="$RECORDINGS_DIR"
             else
                 SIZE_DISPLAY="Unknown"
                 LOCATION="Processed"
@@ -702,6 +730,7 @@ if [ -z "$1" ]; then
     echo "  KEEP_RAW_RECORDING=true    Retain raw MKV files for troubleshooting (default: false)"
     echo "  FORCE_CPU_TRANSCRIPTION=true    Force CPU transcription (default: false)"
     echo "  WHISPER_IGNORE_SSL=true    Bypass SSL verification for Whisper (default: false)"
+    echo "  TRANSCRIPTION_OUTPUT_DIR=path    Set transcription output directory (default: recordings)"
     exit 1
 fi
 
