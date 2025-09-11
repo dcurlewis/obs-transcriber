@@ -673,8 +673,11 @@ function discard_recording() {
     fi
 
     echo "Select a recording to discard:"
-    # Use mapfile to read matching lines into an array
-    mapfile -t options < <(grep ';recorded$' "$QUEUE_FILE")
+    # Create array of options in a portable way (compatible with zsh and bash)
+    options=()
+    while IFS= read -r line; do
+        options+=("$line")
+    done < <(grep ';recorded$' "$QUEUE_FILE")
 
     # Use a select loop to create a menu.
     select opt in "${options[@]}" "Quit"; do
