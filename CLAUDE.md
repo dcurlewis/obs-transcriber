@@ -8,7 +8,7 @@ OBS Meeting Transcriber is a set of scripts to automate the recording, transcrip
 
 - OBS Studio to record
 - FFmpeg to process audio
-- OpenAI's Whisper for transcription
+- MLX Whisper for transcription (optimized for Apple Silicon)
 
 ## Environment Setup
 
@@ -30,7 +30,7 @@ pip install -r requirements.txt
    - OBS Studio with OBS-Websocket Plugin
    - FFmpeg
    - Python 3
-   - OpenAI Whisper
+   - MLX Whisper (Apple Silicon optimized)
 
 1. Configuration via `.env` file in project root:
 
@@ -41,7 +41,8 @@ PORT=4455
 PASSWORD=your_obs_websocket_password
 
 [WHISPER]
-MODEL=base
+# Model options: tiny, base, small, medium, large-v3, turbo, distil-large-v3
+MODEL=turbo
 LANGUAGE=en
 
 [PATHS]
@@ -71,6 +72,7 @@ The codebase consists of:
 
 2. **Python Scripts**:
    - `scripts/obs_controller.py` - Controls OBS via the WebSocket API
+   - `scripts/transcribe.py` - Transcribes audio using MLX Whisper (Apple Silicon optimized)
    - `scripts/interleave.py` - Merges separate transcripts into a single chronological file
    - `scripts/filter_hallucinations.py` - Removes common hallucinations from Whisper transcriptions
 
@@ -90,21 +92,22 @@ The codebase consists of:
 ## Development Notes
 
 - Audio processing parameters are optimized for speech recognition
-- GPU acceleration is used when available (CUDA, MPS on Apple Silicon)
-- SSL bypass option is available for corporate networks with certificate issues
+- MLX Whisper automatically uses Apple Silicon GPU acceleration (Metal)
 - Error recovery is implemented to handle transcription failures
+- Model downloads are cached in HuggingFace hub cache (~/.cache/huggingface)
 
 ## Troubleshooting
 
 If transcription fails:
 
-- First attempt recovery using CPU fallback
-- Check audio file integrity
-- Try manual transcription with the Whisper CLI
+- The script will automatically retry with a smaller model (base)
+- Check audio file integrity with: `ffmpeg -i audio.wav -f null -`
+- Try manual transcription: `python scripts/transcribe.py audio.wav -o ./output -m base`
 - Check available disk space and memory
 
 Common issues:
 
 - OBS WebSocket connectivity failures
 - Corrupted audio files
-- Network issues affecting Whisper model downloads
+- Network issues affecting initial model downloads from HuggingFace
+- Insufficient memory for larger models (try `base` or `small` instead of `turbo`)

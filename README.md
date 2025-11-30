@@ -1,13 +1,13 @@
 # OBS Meeting Transcriber
 
-A set of scripts to automate the recording, transcription, and processing of multi-track meeting audio. This workflow uses OBS Studio to record, FFmpeg to process audio, and OpenAI's Whisper for transcription.
+A set of scripts to automate the recording, transcription, and processing of multi-track meeting audio. This workflow uses OBS Studio to record, FFmpeg to process audio, and MLX Whisper for transcription (optimized for Apple Silicon Macs).
 
 ## Features
 
 - **CLI Control**: Easily start, stop, and process recordings from the command line.
 - **Speaker Separation**: Automatically separates your audio from other participants' audio.
 - **Speaker Diarization**: Identifies and labels different speakers in the "Others" track.
-- **Accurate Transcription**: Utilizes OpenAI's Whisper for high-quality speech-to-text with audio normalization.
+- **Fast & Accurate Transcription**: Utilizes MLX Whisper (Apple Silicon optimized) for high-quality, fast speech-to-text with audio normalization.
 - **Hallucination Filtering**: Removes common transcription artifacts and hallucinations.
 - **Interleaved Transcripts**: Merges separate transcripts into a single, chronologically-ordered file with clear speaker labels.
 - **Organized Files**: Manages recordings and transcripts in a clean, timestamped folder structure for easy access.
@@ -81,12 +81,10 @@ Before you begin, ensure you have the following installed:
     PASSWORD=your_obs_websocket_password
 
     [WHISPER]
-    MODEL=base
+    # Model options: tiny, base, small, medium, large-v3, turbo, distil-large-v3
+    # 'turbo' (large-v3-turbo) recommended for best speed/accuracy balance
+    MODEL=turbo
     LANGUAGE=en
-    # Set to true to bypass SSL verification if you have network certificate issues
-    WHISPER_IGNORE_SSL=false
-    # Set to true to force CPU-only transcription (useful for troubleshooting)
-    FORCE_CPU_TRANSCRIPTION=false
 
     [PATHS]
     # This should be the same as the "Recording Path" in your OBS settings
@@ -162,6 +160,7 @@ The main script `run.sh` provides all the necessary commands:
 │   └── 20231028-Another-Meeting_transcript.txt
 ├── scripts/              # All executable scripts
 │   ├── obs_controller.py        # Controls OBS recording via WebSocket
+│   ├── transcribe.py            # MLX Whisper transcription (Apple Silicon)
 │   ├── interleave.py            # Merges transcripts with timestamps
 │   ├── filter_hallucinations.py # Removes transcription artifacts
 │   └── speaker_diarization.py   # Identifies different speakers
@@ -190,7 +189,8 @@ The following enhancements have been made to improve the quality and usefulness 
 - **Robust File Processing**: Added safety checks to prevent data loss when processing audio files.
 - **Hallucination Filtering**: Automatic removal of common transcription artifacts and "hallucinations" (like repeated "Thank you" phrases during silence).
 
-### GPU Acceleration
+### Apple Silicon Optimization
 
-- **Automatic GPU Detection**: The system automatically detects and uses CUDA or Apple Silicon GPU acceleration when available.
-- **Configurable Fallbacks**: Added options to force CPU processing for troubleshooting on systems with GPU compatibility issues.
+- **MLX Whisper**: Uses MLX Whisper, which is specifically optimized for Apple Silicon Macs using the Metal framework.
+- **Automatic GPU Utilization**: MLX automatically leverages Apple's Neural Engine and GPU for significantly faster transcription.
+- **Multiple Model Options**: Choose from various models (tiny, base, small, medium, large-v3, turbo, distil-large-v3) based on your speed/accuracy needs.

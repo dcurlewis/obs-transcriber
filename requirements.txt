@@ -1,4 +1,4 @@
-openai-whisper
+mlx-whisper>=0.4.0
 obsws-python
 srt
 python-dotenv

@@ -12,7 +12,8 @@ if [ -f .env ]; then
 fi
 
 # Set defaults if not provided in .env
-WHISPER_MODEL=${WHISPER_MODEL:-base}
+# Default to 'turbo' model (large-v3-turbo) for best speed/accuracy balance on Apple Silicon
+WHISPER_MODEL=${WHISPER_MODEL:-turbo}
 WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-en}
 # Use PWD for recordings path if not set, replacing ~ with $HOME
 RECORDING_PATH_RAW=${RECORDING_PATH:-.}
@@ -238,69 +239,21 @@ function process_recordings() {
                 fi
             fi
 
-            # --- Parallel Transcription ---
-            echo "⏳ [2/3] Transcribing audio with Whisper (Model: $WHISPER_MODEL)..."
+            # --- Parallel Transcription with MLX Whisper ---
+            echo "⏳ [2/3] Transcribing audio with MLX Whisper (Model: $WHISPER_MODEL)..."
+            echo "🍎 Using Apple Silicon optimized transcription via MLX"
             TRANSCRIPTION_START=$(date +%s)
-            
-            # Detect GPU acceleration options for 3-10x speed improvement
-            # Check if user wants to force CPU mode (useful for troubleshooting)
-            if [ "${FORCE_CPU_TRANSCRIPTION:-false}" = "true" ]; then
-                WHISPER_DEVICE="cpu"
-                echo "🔧 FORCE_CPU_TRANSCRIPTION=true - using CPU transcription"
-            else
-                WHISPER_DEVICE="cpu"  # Default fallback
-                if command -v nvidia-smi &> /dev/null && nvidia-smi &> /dev/null; then
-                    WHISPER_DEVICE="cuda"
-                    echo "🚀 CUDA GPU detected - testing GPU acceleration..."
-                elif [[ $(uname -m) == "arm64" ]] && [[ $(uname -s) == "Darwin" ]]; then
-                    # Apple Silicon Mac - use MPS (Metal Performance Shaders)
-                    WHISPER_DEVICE="mps"
-                    echo "🚀 Apple Silicon detected - testing MPS GPU acceleration..."
-                else
-                    echo "ℹ️  Using CPU processing (no compatible GPU found)"
-                fi
-            fi
-            
-            # Test GPU compatibility (catches SSL/network issues early)
-            if [ "$WHISPER_DEVICE" != "cpu" ]; then
-                echo "🔍 Testing GPU compatibility and model access..."
-                
-                # Quick test to see if we can load models (catches SSL certificate issues)
-                if timeout 15s python3 -c "
-import whisper
-import warnings
-warnings.filterwarnings('ignore')
-try:
-    # Test model loading - this will fail fast if there are SSL/download issues
-    model = whisper.load_model('base', device='$WHISPER_DEVICE')
-    print('✅ GPU acceleration ready')
-except Exception as e:
-    print(f'❌ GPU test failed: {str(e)[:100]}...')
-    exit(1)
-" 2>/dev/null; then
-                    echo "✅ GPU acceleration confirmed - using $WHISPER_DEVICE device"
-                else
-                    echo "⚠️  GPU test failed (SSL/network/compatibility issue), falling back to CPU"
-                    echo "ℹ️  This is usually due to network restrictions or certificate issues"
-                    WHISPER_DEVICE="cpu"
-                fi
-            fi
             
             # Start both transcriptions in parallel for ~50% speed improvement
             TRANSCRIPTION_PIDS=()
             
             if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ]; then
                 echo "Starting transcription: My audio..."
-                # Add SSL bypass if user requested it via environment variable
-                if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
-                    PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                        --device "$WHISPER_DEVICE" --condition_on_previous_text False --no_speech_threshold 0.8 \
-                        --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav" &
-                else
-                    whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                        --device "$WHISPER_DEVICE" --condition_on_previous_text False --no_speech_threshold 0.8 \
-                        --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav" &
-                fi
+                $PYTHON_CMD "$SCRIPTS_DIR/transcribe.py" \
+                    "$TARGET_DIR/${FINAL_BASENAME}_me.wav" \
+                    -o "$TARGET_DIR" \
+                    -m "$WHISPER_MODEL" \
+                    -l "$WHISPER_LANGUAGE" &
                 TRANSCRIPTION_PIDS+=($!)
             else
                 echo "My audio already transcribed. Skipping."
@@ -308,16 +261,11 @@ except Exception as e:
 
             if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
                 echo "Starting transcription: Others audio..."
-                # Add SSL bypass if user requested it via environment variable
-                if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
-                    PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                        --device "$WHISPER_DEVICE" --condition_on_previous_text False --no_speech_threshold 0.8 \
-                        --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav" &
-                else
-                    whisper --model "$WHISPER_MODEL" --language "$WHISPER_LANGUAGE" --output_format srt \
-                        --device "$WHISPER_DEVICE" --condition_on_previous_text False --no_speech_threshold 0.8 \
-                        --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav" &
-                fi
+                $PYTHON_CMD "$SCRIPTS_DIR/transcribe.py" \
+                    "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
+                    -o "$TARGET_DIR" \
+                    -m "$WHISPER_MODEL" \
+                    -l "$WHISPER_LANGUAGE" &
                 TRANSCRIPTION_PIDS+=($!)
             else
                 echo "Others audio already transcribed. Skipping."
@@ -334,40 +282,29 @@ except Exception as e:
                 done
                 
                 if [ ${#FAILED_PROCESSES[@]} -gt 0 ]; then
-                    echo "⚠️  ${#FAILED_PROCESSES[@]} transcription(s) failed, attempting recovery..."
+                    echo "⚠️  ${#FAILED_PROCESSES[@]} transcription(s) failed, attempting recovery with smaller model..."
                     
-                    # Try fallback transcription with CPU and smaller model if GPU was used
-                    if [ "$WHISPER_DEVICE" != "cpu" ]; then
-                        echo "🔄 Retrying with CPU fallback..."
-                        RETRY_START=$(date +%s)
-                        
-                        # Retry failed transcriptions with CPU
-                        if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ]; then
-                            if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
-                                PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
-                                    --device cpu --condition_on_previous_text False --no_speech_threshold 0.8 \
-                                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
-                            else
-                                whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
-                                    --device cpu --condition_on_previous_text False --no_speech_threshold 0.8 \
-                                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_me.wav"
-                            fi
-                        fi
-                        if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
-                            if [ "${WHISPER_IGNORE_SSL:-false}" = "true" ]; then
-                                PYTHONHTTPSVERIFY=0 CURL_CA_BUNDLE='' whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
-                                    --device cpu --condition_on_previous_text False --no_speech_threshold 0.8 \
-                                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
-                            else
-                                whisper --model base --language "$WHISPER_LANGUAGE" --output_format srt \
-                                    --device cpu --condition_on_previous_text False --no_speech_threshold 0.8 \
-                                    --output_dir "$TARGET_DIR" "$TARGET_DIR/${FINAL_BASENAME}_others.wav"
-                            fi
-                        fi
-                        
-                        RETRY_END=$(date +%s)
-                        TRANSCRIPTION_TIME=$((RETRY_END - RETRY_START))
+                    # Retry failed transcriptions with a smaller/faster model
+                    echo "🔄 Retrying with 'base' model..."
+                    RETRY_START=$(date +%s)
+                    
+                    if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ]; then
+                        $PYTHON_CMD "$SCRIPTS_DIR/transcribe.py" \
+                            "$TARGET_DIR/${FINAL_BASENAME}_me.wav" \
+                            -o "$TARGET_DIR" \
+                            -m "base" \
+                            -l "$WHISPER_LANGUAGE"
                     fi
+                    if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.wav" ]; then
+                        $PYTHON_CMD "$SCRIPTS_DIR/transcribe.py" \
+                            "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
+                            -o "$TARGET_DIR" \
+                            -m "base" \
+                            -l "$WHISPER_LANGUAGE"
+                    fi
+                    
+                    RETRY_END=$(date +%s)
+                    TRANSCRIPTION_TIME=$((RETRY_END - RETRY_START))
                     
                     # Check if recovery was successful
                     if [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_others.srt" ]; then
@@ -376,8 +313,9 @@ except Exception as e:
                         echo "❌ Transcription failed even after recovery attempts"
                         echo "💡 Troubleshooting suggestions:"
                         echo "   - Check audio file integrity: ffmpeg -i \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\" -f null -"
-                        echo "   - Try manual transcription: whisper --model base --device cpu \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\""
+                        echo "   - Try manual transcription: python scripts/transcribe.py \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\" -o \"$TARGET_DIR\" -m base"
                         echo "   - Check available disk space and memory"
+                        echo "   - Ensure mlx-whisper is installed: pip install mlx-whisper"
                     fi
                 else
                     TRANSCRIPTION_END=$(date +%s)
@@ -730,9 +668,10 @@ if [ -z "$1" ]; then
     echo "  discard       - Discard recordings (with confirmation)"
     echo ""
     echo "Environment Variables:"
+    echo "  WHISPER_MODEL=turbo        Whisper model to use (default: turbo)"
+    echo "                             Options: tiny, base, small, medium, large-v3, turbo, distil-large-v3"
+    echo "  WHISPER_LANGUAGE=en        Language code for transcription (default: en)"
     echo "  KEEP_RAW_RECORDING=true    Retain raw MKV files for troubleshooting (default: false)"
-    echo "  FORCE_CPU_TRANSCRIPTION=true    Force CPU transcription (default: false)"
-    echo "  WHISPER_IGNORE_SSL=true    Bypass SSL verification for Whisper (default: false)"
     echo "  TRANSCRIPTION_OUTPUT_DIR=path    Set transcription output directory (default: recordings)"
     exit 1
 fi
@@ -740,8 +679,8 @@ fi
 COMMAND=$1
 shift
 
-# Check dependencies
-check_deps "$PYTHON_CMD" ffmpeg whisper
+# Check dependencies (whisper CLI no longer needed - using mlx-whisper via Python)
+check_deps "$PYTHON_CMD" ffmpeg
 
 case $COMMAND in
     start)
