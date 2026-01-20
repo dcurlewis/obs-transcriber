@@ -92,7 +92,7 @@ function start_recording() {
     echo "Starting recording for: $MEETING_NAME"
     $PYTHON_CMD "$SCRIPTS_DIR/obs_controller.py" start
     
-    MEETING_DATE=$(date +"%Y%m%d")
+    MEETING_DATE=$(date +"%Y%m%d_%H%M")
     echo "$MEETING_NAME" > "$PENDING_FILE"
     echo "$MEETING_DATE" >> "$PENDING_FILE"
     
