@@ -3,4 +3,10 @@ obsws-python
 srt
 python-dotenv
 pyannote.audio>=2.1.0
-torch>=1.9.0 
+torch>=1.9.0
+flask>=3.0
+icalendar>=5.0.0
+pytz
+tzlocal
+requests
+pyobjc-framework-EventKit>=10.0 

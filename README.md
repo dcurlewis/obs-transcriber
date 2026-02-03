@@ -95,7 +95,27 @@ Before you begin, ensure you have the following installed:
 
 ## Usage
 
-The main script `run.sh` provides all the necessary commands:
+### Web UI (Recommended)
+
+Start the web interface for easy one-click recording:
+
+```bash
+./run.sh web
+```
+
+Then open `http://localhost:5000` in your browser.
+
+**Optional - Add Calendar:**
+
+Sync your Google Calendar to macOS Calendar.app (System Settings > Internet Accounts > Add Google Account). The web UI will automatically read your calendar - no config needed!
+
+**First time:** macOS will ask for calendar permission when you start the web UI. Click "OK" to allow.
+
+Your meetings will appear in the UI for one-click recording. OBS launches automatically.
+
+### CLI Commands
+
+The `run.sh` script also provides CLI commands:
 
 - **Start Recording**:
 
@@ -164,7 +184,12 @@ The main script `run.sh` provides all the necessary commands:
 │   ├── interleave.py            # Merges transcripts with timestamps
 │   ├── filter_hallucinations.py # Removes transcription artifacts
 │   └── speaker_diarization.py   # Identifies different speakers
-└── run.sh                # Main CLI entrypoint
+├── web/                  # Web UI (optional)
+│   ├── app.py                   # Flask server
+│   ├── calendar_service.py      # Google Calendar integration (iCal)
+│   ├── recorder.py              # Recording controller
+│   └── templates/static/        # Web interface files
+└── run.sh                # Main entrypoint (CLI and Web UI)
 ```
 
 Note: During processing, temporary files (MKV, WAV, SRT) are created in a subdirectory but cleaned up after successful transcription. Only the final transcript file is saved to your configured output directory.

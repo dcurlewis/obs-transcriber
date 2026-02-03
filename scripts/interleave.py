@@ -1,15 +1,53 @@
 import srt
 import sys
 import re
-from datetime import timedelta
+import argparse
+from datetime import datetime, timedelta
+
+
+def print_header(meeting_name, meeting_date, attendees):
+    """Print meeting metadata header at the top of the transcript"""
+    has_header = False
+    
+    if meeting_name:
+        print(f"Meeting: {meeting_name}")
+        has_header = True
+    
+    if meeting_date:
+        # Format: 20240204_1000 -> 2024-02-04 10:00
+        try:
+            dt = datetime.strptime(meeting_date, "%Y%m%d_%H%M")
+            print(f"Date: {dt.strftime('%Y-%m-%d %H:%M')}")
+        except ValueError:
+            print(f"Date: {meeting_date}")
+        has_header = True
+    
+    if attendees:
+        # Convert pipe-delimited attendees to comma-separated
+        attendee_list = attendees.replace('|', ', ')
+        print(f"Attendees: {attendee_list}")
+        has_header = True
+    
+    if has_header:
+        print()
+        print("---")
+        print()
+
 
 def main():
-    if len(sys.argv) != 3:
-        print("Usage: python interleave.py <me_srt_file> <others_srt_file>")
-        sys.exit(1)
-
-    me_srt_file = sys.argv[1]
-    others_srt_file = sys.argv[2]
+    parser = argparse.ArgumentParser(
+        description="Interleave two SRT files into a single chronological transcript"
+    )
+    parser.add_argument('me_srt_file', help='SRT file for "Me" speaker')
+    parser.add_argument('others_srt_file', help='SRT file for "Others" speakers')
+    parser.add_argument('--meeting-name', default='', help='Name of the meeting')
+    parser.add_argument('--meeting-date', default='', help='Date of the meeting (YYYYMMDD_HHMM format)')
+    parser.add_argument('--attendees', default='', help='Pipe-delimited list of attendees')
+    
+    args = parser.parse_args()
+    
+    me_srt_file = args.me_srt_file
+    others_srt_file = args.others_srt_file
 
     try:
         with open(me_srt_file, 'r', encoding='utf-8') as f:
@@ -39,6 +77,9 @@ def main():
     except Exception as e:
         print(f"Error parsing SRT files: {e}")
         sys.exit(1)
+
+    # Print meeting metadata header
+    print_header(args.meeting_name, args.meeting_date, args.attendees)
 
     all_subs = sorted(me_subs + other_subs, key=lambda x: x.start)
 

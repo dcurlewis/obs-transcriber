@@ -162,7 +162,10 @@ function process_recordings() {
     PROCESSED_RECORDINGS=()
 
     # Process each 'recorded' entry
-    while IFS=';' read -r raw_mkv_path meeting_name meeting_date status; do
+    # IMPORTANT: read the queue file from a dedicated FD so commands inside the loop
+    # (notably ffmpeg) can't accidentally consume the queue and corrupt subsequent reads.
+    exec 3< "$TEMP_QUEUE_FILE"
+    while IFS=';' read -r raw_mkv_path meeting_name meeting_date status attendees <&3; do
         if [ "$status" = "recorded" ]; then
             echo "-----------------------------------------------------"
             echo "Processing: '$meeting_name' from $meeting_date"
@@ -202,7 +205,9 @@ function process_recordings() {
                 # - ac 1: Convert to mono (often better for speech)
                 # - dynaudnorm: Dynamic audio normalizer to ensure consistent levels
                 # - highpass/lowpass: Filter for speech frequencies (80Hz-8kHz)
-                ffmpeg -i "$TARGET_DIR/${FINAL_BASENAME}.mkv" \
+                # -nostdin prevents ffmpeg from consuming stdin (which would corrupt the queue reads)
+                # -y avoids interactive overwrite prompts (another stdin consumer)
+                ffmpeg -nostdin -y -i "$TARGET_DIR/${FINAL_BASENAME}.mkv" \
                     -map 0:a:0 -af "dynaudnorm=f=150:g=15:p=0.75,highpass=f=80,lowpass=f=8000" -acodec pcm_s16le -ar 16000 -ac 1 "$TARGET_DIR/${FINAL_BASENAME}_me.wav" \
                     -map 0:a:1 -af "dynaudnorm=f=150:g=15:p=0.75,highpass=f=80,lowpass=f=8000" -acodec pcm_s16le -ar 16000 -ac 1 "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
                     -loglevel error
@@ -362,7 +367,10 @@ function process_recordings() {
             FINAL_TRANSCRIPT_PATH="$RECORDINGS_DIR/${FINAL_BASENAME}_transcript.txt"
             $PYTHON_CMD "$SCRIPTS_DIR/interleave.py" \
                 "$TARGET_DIR/${FINAL_BASENAME}_me.srt" \
-                "$TARGET_DIR/${FINAL_BASENAME}_others.srt" > "$FINAL_TRANSCRIPT_PATH"
+                "$TARGET_DIR/${FINAL_BASENAME}_others.srt" \
+                --meeting-name "$meeting_name" \
+                --meeting-date "$meeting_date" \
+                --attendees "$attendees" > "$FINAL_TRANSCRIPT_PATH"
             
             # Verify final transcript file was successfully created before deleting SRT files
             if [ -f "$FINAL_TRANSCRIPT_PATH" ]; then
@@ -407,7 +415,8 @@ function process_recordings() {
                 echo "   └─ Interleaving: ${INTERLEAVE_TIME}s"
             fi
         fi
-    done < "$TEMP_QUEUE_FILE"
+    done
+    exec 3<&-
 
     rm "$TEMP_QUEUE_FILE"
     
@@ -655,9 +664,20 @@ function discard_recording() {
 }
 
 
+# --- Web UI Command ---
+function start_web_ui() {
+    echo "🚀 Starting Meeting Transcriber Web UI..."
+    echo "📍 Access at: http://localhost:5000"
+    echo "⌨️  Press Ctrl+C to stop"
+    echo ""
+    
+    # Start the Flask server
+    $PYTHON_CMD -m web.app
+}
+
 # --- Main Logic ---
 if [ -z "$1" ]; then
-    echo "Usage: $0 <start|stop|abort|process|status|discard> [args]"
+    echo "Usage: $0 <start|stop|abort|process|status|discard|web> [args]"
     echo ""
     echo "Commands:"
     echo "  start <name>  - Start recording with the given meeting name"
@@ -666,6 +686,7 @@ if [ -z "$1" ]; then
     echo "  process       - Process all queued recordings"
     echo "  status        - Show recording queue status"
     echo "  discard       - Discard recordings (with confirmation)"
+    echo "  web           - Start the web UI (http://localhost:5000)"
     echo ""
     echo "Environment Variables:"
     echo "  WHISPER_MODEL=turbo        Whisper model to use (default: turbo)"
@@ -673,6 +694,8 @@ if [ -z "$1" ]; then
     echo "  WHISPER_LANGUAGE=en        Language code for transcription (default: en)"
     echo "  KEEP_RAW_RECORDING=true    Retain raw MKV files for troubleshooting (default: false)"
     echo "  TRANSCRIPTION_OUTPUT_DIR=path    Set transcription output directory (default: recordings)"
+    echo "  WEB_PORT=5000              Web UI port (default: 5000)"
+    echo "  WEB_HOST=127.0.0.1         Web UI host (default: 127.0.0.1)"
     exit 1
 fi
 
@@ -700,6 +723,9 @@ case $COMMAND in
         ;;
     discard)
         discard_recording
+        ;;
+    web)
+        start_web_ui
         ;;
     *)
         echo "Unknown command: $COMMAND"

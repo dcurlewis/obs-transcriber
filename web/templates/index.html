@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Meeting Transcriber</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="header-content">
+                <div class="title-section">
+                    <h1>Meeting Transcriber</h1>
+                    <div id="current-time" class="current-time"></div>
+                </div>
+                <div id="recording-indicator" class="status-indicator"></div>
+            </div>
+        </header>
+
+        <main>
+            <!-- Today's Meetings Section -->
+            <section class="meetings-section">
+                <div class="section-header">
+                    <h2>Today's Meetings</h2>
+                    <span id="current-date"></span>
+                </div>
+                
+                <div id="meetings-list" class="meetings-list">
+                    <div class="loading">Loading calendar...</div>
+                </div>
+            </section>
+
+            <!-- Quick Record Section -->
+            <section class="quick-record-section">
+                <h3>Quick Record (no calendar event)</h3>
+                <div class="quick-record-form">
+                    <input 
+                        type="text" 
+                        id="manual-meeting-name" 
+                        placeholder="Meeting name..."
+                        autocomplete="off"
+                    >
+                    <button id="manual-start-btn" class="btn btn-primary">
+                        <span class="icon">▶</span> Start
+                    </button>
+                </div>
+            </section>
+
+            <!-- Processing Queue Section -->
+            <section class="queue-section">
+                <div class="section-header">
+                    <h2>Processing Queue</h2>
+                    <button id="process-all-btn" class="btn btn-secondary">Process All Pending</button>
+                </div>
+                
+                <div id="queue-list" class="queue-list">
+                    <div class="loading">Loading queue...</div>
+                </div>
+            </section>
+        </main>
+    </div>
+
+    <!-- Toast notification -->
+    <div id="toast" class="toast"></div>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
+</body>
+</html>
