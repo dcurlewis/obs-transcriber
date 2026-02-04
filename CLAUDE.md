@@ -96,6 +96,16 @@ The codebase consists of:
 - Error recovery is implemented to handle transcription failures
 - Model downloads are cached in HuggingFace hub cache (~/.cache/huggingface)
 
+## Working with Git and Terminal Commands
+
+**IMPORTANT**: When running git commands (status, add, commit, push, pull, diff, etc.) in this workspace:
+- **ALWAYS** use `required_permissions: ["all"]`
+- The sandbox does not work properly with git operations - they will fail or give incomplete output
+- Never waste time trying git commands in the sandbox first
+- Go straight to `required_permissions: ["all"]` for any git operation
+
+This applies to any command that needs to interact with git state or push to remote repositories.
+
 ## Troubleshooting
 
 If transcription fails:
