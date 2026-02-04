@@ -10,7 +10,7 @@ class MeetingTranscriber {
         this.statusInterval = null;
         this.meetingsInterval = null;
         this.currentQueuePage = 1;
-        this.queueItemsPerPage = 20;
+        this.queueItemsPerPage = 10;
         this.currentViewDate = new Date(); // Date being viewed
         this.todayDate = new Date(); // Actual today
         

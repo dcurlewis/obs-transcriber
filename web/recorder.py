@@ -11,20 +11,28 @@ from datetime import datetime
 import csv
 import threading
 import logging
+from logging.handlers import TimedRotatingFileHandler
 
 # Configure logging for processing
 LOG_DIR = Path(__file__).parent.parent / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
 
-# Set up file handler for processing logs
+# Set up file handler for processing logs with weekly rotation
+# Keeps 4 weeks of logs (backupCount=4), rotates every Monday at midnight
 processing_logger = logging.getLogger('processing')
 processing_logger.setLevel(logging.INFO)
 
-# Create file handler that writes to a rotating log file
 log_file = LOG_DIR / 'processing.log'
-file_handler = logging.FileHandler(log_file)
+file_handler = TimedRotatingFileHandler(
+    log_file,
+    when='W0',           # Rotate weekly on Monday
+    interval=1,          # Every 1 week
+    backupCount=4,       # Keep 4 weeks of logs (~1 month)
+    encoding='utf-8'
+)
 file_handler.setLevel(logging.INFO)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+file_handler.suffix = '%Y-%m-%d'  # Backup files named: processing.log.2026-02-03
 processing_logger.addHandler(file_handler)
 
 

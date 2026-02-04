@@ -140,7 +140,7 @@ function process_recordings() {
         return
     fi
 
-    UNPROCESSED_COUNT=$(grep -c ';recorded$' "$QUEUE_FILE" || true)
+    UNPROCESSED_COUNT=$(grep -cE ';recorded(;|$)' "$QUEUE_FILE" || true)
     if [ "$UNPROCESSED_COUNT" -eq 0 ]; then
         echo "No recordings to process."
         return
@@ -462,17 +462,10 @@ function show_status() {
     TOTAL_FILES=0
     TOTAL_SIZE=0
     
-    while IFS=';' read -r raw_mkv_path meeting_name meeting_date status; do
+    while IFS=';' read -r raw_mkv_path meeting_name meeting_date status attendees; do
         # Skip malformed entries (need at least 4 semicolon-separated fields)
         if [ -z "$status" ] || [ -z "$meeting_date" ] || [ -z "$meeting_name" ] || [ -z "$raw_mkv_path" ]; then
             echo "⚠️  Skipping malformed entry: $raw_mkv_path;$meeting_name;$meeting_date;$status" >&2
-            continue
-        fi
-        
-        # Skip entries with too many fields (corrupted data)
-        FIELD_COUNT=$(echo "$raw_mkv_path;$meeting_name;$meeting_date;$status" | tr -cd ';' | wc -c)
-        if [ "$FIELD_COUNT" -gt 3 ]; then
-            echo "⚠️  Skipping corrupted entry with too many fields" >&2
             continue
         fi
         
@@ -540,8 +533,8 @@ function show_status() {
     
     # Summary statistics
     TOTAL_SIZE_MB=$((TOTAL_SIZE / 1024 / 1024))
-    RECORDED_COUNT=$(grep -c ';recorded$' "$QUEUE_FILE" 2>/dev/null || echo "0")
-    PROCESSED_COUNT=$(grep -c ';processed$' "$QUEUE_FILE" 2>/dev/null || echo "0")
+    RECORDED_COUNT=$(grep -cE ';recorded(;|$)' "$QUEUE_FILE" 2>/dev/null || echo "0")
+    PROCESSED_COUNT=$(grep -cE ';processed(;|$)' "$QUEUE_FILE" 2>/dev/null || echo "0")
     
     # Clean up counts (remove any newlines/whitespace) and ensure they're valid integers
     RECORDED_COUNT=$(echo "$RECORDED_COUNT" | tr -d '\n\r' | grep -o '[0-9]*' | head -1)
@@ -619,7 +612,7 @@ function discard_recording() {
     fi
 
     # Case 2: Select a queued recording to discard.
-    if [ ! -f "$QUEUE_FILE" ] || ! grep -q ';recorded$' "$QUEUE_FILE"; then
+    if [ ! -f "$QUEUE_FILE" ] || ! grep -qE ';recorded(;|$)' "$QUEUE_FILE"; then
         echo "No queued recordings to discard."
         return
     fi
@@ -629,7 +622,7 @@ function discard_recording() {
     options=()
     while IFS= read -r line; do
         options+=("$line")
-    done < <(grep ';recorded$' "$QUEUE_FILE")
+    done < <(grep -E ';recorded(;|$)' "$QUEUE_FILE")
 
     # Use a select loop to create a menu.
     select opt in "${options[@]}" "Quit"; do
