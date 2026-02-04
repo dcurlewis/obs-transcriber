@@ -108,8 +108,9 @@ function stop_recording() {
     echo "Stopping recording..."
     $PYTHON_CMD "$SCRIPTS_DIR/obs_controller.py" stop
     
-    MEETING_NAME=$(head -n 1 "$PENDING_FILE")
-    MEETING_DATE=$(tail -n 1 "$PENDING_FILE")
+    MEETING_NAME=$(sed -n '1p' "$PENDING_FILE")
+    MEETING_DATE=$(sed -n '2p' "$PENDING_FILE")
+    ATTENDEES=$(sed -n '3p' "$PENDING_FILE")
     
     # Give OBS a moment to finalize the file
     sleep 4 
@@ -125,8 +126,8 @@ function stop_recording() {
     # Create queue file if it doesn't exist
     touch "$QUEUE_FILE"
 
-    # Use semicolon as delimiter for CSV
-    echo "$LATEST_RECORDING;$MEETING_NAME;$MEETING_DATE;recorded" >> "$QUEUE_FILE"
+    # Use semicolon as delimiter for CSV (5th field is attendees, may be empty)
+    echo "$LATEST_RECORDING;$MEETING_NAME;$MEETING_DATE;recorded;$ATTENDEES" >> "$QUEUE_FILE"
     
     rm "$PENDING_FILE"
     echo "Recording stopped and logged to queue."
@@ -187,6 +188,10 @@ function process_recordings() {
                 mv "$raw_mkv_path" "$TARGET_DIR/${FINAL_BASENAME}.mkv"
             elif [ -f "$TARGET_DIR/${FINAL_BASENAME}.mkv" ]; then
                 echo "Source file already moved. Skipping move."
+            elif [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ] || [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ]; then
+                # Recovery mode: MKV is gone but audio/transcript files exist
+                echo "⚠️  MKV file not found, but audio/transcript files exist. Continuing from recovery..."
+                echo "   (This can happen if processing was interrupted after audio extraction)"
             else
                 echo "❌ Error: Source file not found and target file doesn't exist!"
                 echo "   Expected source: $raw_mkv_path"

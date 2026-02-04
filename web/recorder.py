@@ -9,10 +9,31 @@ import time
 from pathlib import Path
 from datetime import datetime
 import csv
+import threading
+import logging
+
+# Configure logging for processing
+LOG_DIR = Path(__file__).parent.parent / 'logs'
+LOG_DIR.mkdir(exist_ok=True)
+
+# Set up file handler for processing logs
+processing_logger = logging.getLogger('processing')
+processing_logger.setLevel(logging.INFO)
+
+# Create file handler that writes to a rotating log file
+log_file = LOG_DIR / 'processing.log'
+file_handler = logging.FileHandler(log_file)
+file_handler.setLevel(logging.INFO)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+processing_logger.addHandler(file_handler)
 
 
 class RecordingController:
     """Controls OBS recording and manages the processing queue"""
+    
+    # Class-level tracking for processing state
+    _processing_pid = None
+    _processing_lock = threading.Lock()
     
     def __init__(self):
         self.project_root = Path(__file__).parent.parent
@@ -20,6 +41,8 @@ class RecordingController:
         self.queue_file = self.project_root / 'processing_queue.csv'
         self.obs_controller = self.project_root / 'scripts' / 'obs_controller.py'
         self.python_cmd = self._get_python_cmd()
+        self.log_dir = self.project_root / 'logs'
+        self.log_dir.mkdir(exist_ok=True)
         
     def _get_python_cmd(self):
         """Get the Python command to use (prefer venv)"""
@@ -213,27 +236,118 @@ class RecordingController:
                 'error': f"Failed to stop recording: {e.stderr}"
             }
     
+    def _is_processing_running(self):
+        """Check if a processing job is currently running"""
+        with RecordingController._processing_lock:
+            if RecordingController._processing_pid is not None:
+                try:
+                    # Check if process is still running
+                    os.kill(RecordingController._processing_pid, 0)
+                    return True
+                except OSError:
+                    # Process has finished
+                    RecordingController._processing_pid = None
+            return False
+    
+    def _run_processing(self, log_file_path):
+        """Run processing in a thread, capturing output to log file"""
+        run_script = self.project_root / 'run.sh'
+        
+        processing_logger.info("=" * 60)
+        processing_logger.info("Starting transcription processing")
+        processing_logger.info("=" * 60)
+        
+        try:
+            with open(log_file_path, 'a') as log_file:
+                log_file.write(f"\n{'='*60}\n")
+                log_file.write(f"Processing started at {datetime.now().isoformat()}\n")
+                log_file.write(f"{'='*60}\n\n")
+                log_file.flush()
+                
+                process = subprocess.Popen(
+                    [str(run_script), 'process'],
+                    stdout=log_file,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    cwd=str(self.project_root)
+                )
+                
+                with RecordingController._processing_lock:
+                    RecordingController._processing_pid = process.pid
+                
+                # Wait for process to complete
+                process.wait()
+                
+                log_file.write(f"\n{'='*60}\n")
+                log_file.write(f"Processing finished at {datetime.now().isoformat()}\n")
+                log_file.write(f"Exit code: {process.returncode}\n")
+                log_file.write(f"{'='*60}\n")
+                
+                processing_logger.info(f"Processing completed with exit code {process.returncode}")
+                
+        except Exception as e:
+            processing_logger.error(f"Processing failed with error: {e}")
+            with open(log_file_path, 'a') as log_file:
+                log_file.write(f"\nERROR: {e}\n")
+        finally:
+            with RecordingController._processing_lock:
+                RecordingController._processing_pid = None
+
+    def get_processing_status(self):
+        """Get the current processing status and recent log content"""
+        is_running = self._is_processing_running()
+        log_file = self.log_dir / 'processing.log'
+        
+        recent_log = ""
+        if log_file.exists():
+            try:
+                # Get last 50 lines of log
+                with open(log_file, 'r') as f:
+                    lines = f.readlines()
+                    recent_log = ''.join(lines[-50:])
+            except Exception:
+                pass
+        
+        return {
+            'is_processing': is_running,
+            'pid': RecordingController._processing_pid,
+            'log_file': str(log_file),
+            'recent_log': recent_log
+        }
+
     def process_recordings(self):
         """Trigger transcription processing"""
+        # Check if already processing
+        if self._is_processing_running():
+            return {
+                'success': False,
+                'error': f'Processing already in progress (PID: {RecordingController._processing_pid}). Check logs/processing.log for progress.',
+                'log_file': str(self.log_dir / 'processing.log')
+            }
+        
         try:
-            # Run the process command in the background
-            run_script = self.project_root / 'run.sh'
+            log_file_path = self.log_dir / 'processing.log'
             
-            # Start processing in background
-            process = subprocess.Popen(
-                [str(run_script), 'process'],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+            # Start processing in a background thread
+            thread = threading.Thread(
+                target=self._run_processing,
+                args=(log_file_path,),
+                daemon=True
             )
+            thread.start()
+            
+            # Give the thread a moment to start the process
+            time.sleep(0.5)
             
             return {
                 'success': True,
-                'message': 'Processing started in background',
-                'pid': process.pid
+                'message': 'Processing started in background. Check logs/processing.log for progress.',
+                'log_file': str(log_file_path),
+                'pid': RecordingController._processing_pid
             }
             
         except Exception as e:
+            processing_logger.error(f"Failed to start processing: {e}")
             return {
                 'success': False,
                 'error': f"Failed to start processing: {str(e)}"

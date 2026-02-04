@@ -39,6 +39,10 @@ def get_status():
     """Get current recording status and processing queue"""
     try:
         status = recorder.get_status()
+        # Add processing status
+        processing_status = recorder.get_processing_status()
+        status['is_processing'] = processing_status['is_processing']
+        status['processing_pid'] = processing_status['pid']
         return jsonify(status)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
@@ -116,6 +120,16 @@ def process_recordings():
     try:
         result = recorder.process_recordings()
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/processing-status', methods=['GET'])
+def get_processing_status():
+    """Get current processing status and recent log output"""
+    try:
+        status = recorder.get_processing_status()
+        return jsonify(status)
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 

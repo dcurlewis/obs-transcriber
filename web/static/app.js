@@ -306,15 +306,6 @@ class MeetingTranscriber {
                 // Use original if parsing fails
             }
             
-            let actionButton = '';
-            if (item.status === 'recorded') {
-                actionButton = `
-                    <button class="btn btn-secondary btn-small" onclick="app.processRecording('${item.path}')">
-                        Process Now
-                    </button>
-                `;
-            }
-            
             return `
                 <div class="queue-item">
                     <div class="queue-info">
@@ -324,7 +315,6 @@ class MeetingTranscriber {
                         <span class="queue-separator">•</span>
                         <span class="queue-date">${formattedDate}</span>
                     </div>
-                    ${actionButton}
                 </div>
             `;
         }).join('');
@@ -461,12 +451,6 @@ class MeetingTranscriber {
         } catch (error) {
             this.showToast('Error starting processing: ' + error.message, 'error');
         }
-    }
-    
-    async processRecording(recordingPath) {
-        // For now, just trigger process all
-        // Could be enhanced to process individual recordings
-        this.processAllRecordings();
     }
     
     showToast(message, type = 'info') {
