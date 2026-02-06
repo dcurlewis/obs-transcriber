@@ -218,20 +218,19 @@ class TestFileLocking:
 
         def write_entry(thread_id):
             try:
-                # Each thread reads, adds entry, writes back
-                entries = manager.read_queue()
-                entries.append({
-                    'path': f'/test{thread_id}.mkv',
-                    'name': f'Thread {thread_id}',
-                    'date': '20260207',
-                    'status': 'recorded',
-                    'attendees': '',
-                    'duration': '',
-                    'size': '',
-                    'error': '',
-                    'processing_time': ''
-                })
-                manager.write_queue(entries)
+                # Each thread uses atomic_update for read-modify-write
+                with manager.atomic_update() as entries:
+                    entries.append({
+                        'path': f'/test{thread_id}.mkv',
+                        'name': f'Thread {thread_id}',
+                        'date': '20260207',
+                        'status': 'recorded',
+                        'attendees': '',
+                        'duration': '',
+                        'size': '',
+                        'error': '',
+                        'processing_time': ''
+                    })
                 results.append(thread_id)
             except Exception as e:
                 errors.append(str(e))
