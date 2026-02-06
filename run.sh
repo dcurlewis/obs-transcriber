@@ -123,11 +123,14 @@ function stop_recording() {
         exit 1
     fi
     
-    # Create queue file if it doesn't exist
-    touch "$QUEUE_FILE"
+    # Add to queue using queue_cli.py for safe CSV handling
+    $PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" add "$LATEST_RECORDING" "$MEETING_NAME" "$MEETING_DATE" "recorded" "$ATTENDEES"
 
-    # Use semicolon as delimiter for CSV (5th field is attendees, may be empty)
-    echo "$LATEST_RECORDING;$MEETING_NAME;$MEETING_DATE;recorded;$ATTENDEES" >> "$QUEUE_FILE"
+    if [ $? -ne 0 ]; then
+        echo "Error: Failed to add recording to queue"
+        rm "$PENDING_FILE"
+        exit 1
+    fi
     
     rm "$PENDING_FILE"
     echo "Recording stopped and logged to queue."
@@ -140,7 +143,7 @@ function process_recordings() {
         return
     fi
 
-    UNPROCESSED_COUNT=$(grep -cE ';recorded(;|$)' "$QUEUE_FILE" || true)
+    UNPROCESSED_COUNT=$($PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" list recorded 2>/dev/null | $PYTHON_CMD -c "import sys, json; print(len(json.load(sys.stdin)))" 2>/dev/null || echo "0")
     if [ "$UNPROCESSED_COUNT" -eq 0 ]; then
         echo "No recordings to process."
         return
@@ -155,19 +158,26 @@ function process_recordings() {
         mkdir -p "$RECORDINGS_DIR"
     fi
     
-    # Use a temporary file for safe iteration and modification
+    # Get list of recorded entries using queue_cli.py
+    # Use a temporary file for safe iteration (ffmpeg can't consume stdin this way)
     TEMP_QUEUE_FILE=$(mktemp)
-    cp "$QUEUE_FILE" "$TEMP_QUEUE_FILE"
-    
+    $PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" list recorded | $PYTHON_CMD -c "
+import sys, json
+entries = json.load(sys.stdin)
+for entry in entries:
+    # Output in pipe-delimited format for shell parsing
+    print('|'.join([entry.get('path', ''), entry.get('name', ''), entry.get('date', ''), entry.get('status', ''), entry.get('attendees', '')]))
+" > "$TEMP_QUEUE_FILE"
+
     # Track which recordings were successfully processed
     PROCESSED_RECORDINGS=()
 
     # Process each 'recorded' entry
-    # IMPORTANT: read the queue file from a dedicated FD so commands inside the loop
-    # (notably ffmpeg) can't accidentally consume the queue and corrupt subsequent reads.
+    # IMPORTANT: read from a dedicated FD so commands inside the loop
+    # (notably ffmpeg) can't accidentally consume stdin and corrupt subsequent reads.
     exec 3< "$TEMP_QUEUE_FILE"
-    while IFS=';' read -r raw_mkv_path meeting_name meeting_date status attendees <&3; do
-        if [ "$status" = "recorded" ]; then
+    while IFS='|' read -r raw_mkv_path meeting_name meeting_date status attendees <&3; do
+        if [ "$status" = "recorded" ] && [ -n "$raw_mkv_path" ]; then
             echo "-----------------------------------------------------"
             echo "Processing: '$meeting_name' from $meeting_date"
             echo "Source file: $raw_mkv_path"
@@ -401,8 +411,8 @@ function process_recordings() {
                 echo "Warning: Interleaving failed. Keeping SRT files for safety."
             fi
 
-            # Mark this recording as successfully processed (defer CSV update until after loop)
-            PROCESSED_RECORDINGS+=("$raw_mkv_path;$meeting_name;$meeting_date")
+            # Mark this recording as successfully processed (defer queue update until after loop)
+            PROCESSED_RECORDINGS+=("$raw_mkv_path")
 
             # Final processing summary with timing
             PROCESSING_END=$(date +%s)
@@ -425,23 +435,16 @@ function process_recordings() {
 
     rm "$TEMP_QUEUE_FILE"
     
-    # Now update the CSV file for all successfully processed recordings
+    # Now update the queue for all successfully processed recordings using queue_cli.py
     if [ ${#PROCESSED_RECORDINGS[@]} -gt 0 ]; then
-        TEMP_QUEUE_UPDATE=$(mktemp)
-        cp "$QUEUE_FILE" "$TEMP_QUEUE_UPDATE"
-        
-        for recording_info in "${PROCESSED_RECORDINGS[@]}"; do
-            # Split the recording info back into components
-            IFS=';' read -r path name date <<< "$recording_info"
-            # Use awk for safe CSV field updating
-            awk -F';' -v path="$path" -v name="$name" -v date="$date" \
-                'BEGIN {OFS=";"} 
-                 $1 == path && $2 == name && $3 == date && $4 == "recorded" {$4 = "processed"} 
-                 {print}' "$TEMP_QUEUE_UPDATE" > "$TEMP_QUEUE_UPDATE.new"
-            mv "$TEMP_QUEUE_UPDATE.new" "$TEMP_QUEUE_UPDATE"
+        for path in "${PROCESSED_RECORDINGS[@]}"; do
+            # Update status using queue_cli.py
+            $PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" update "$path" "processed"
+
+            if [ $? -ne 0 ]; then
+                echo "Warning: Failed to update queue status for: $path"
+            fi
         done
-        
-        mv "$TEMP_QUEUE_UPDATE" "$QUEUE_FILE"
     fi
     
     echo "-----------------------------------------------------"
@@ -462,10 +465,16 @@ function show_status() {
     TOTAL_FILES=0
     TOTAL_SIZE=0
     
-    while IFS=';' read -r raw_mkv_path meeting_name meeting_date status attendees; do
-        # Skip malformed entries (need at least 4 semicolon-separated fields)
+    # Get queue entries as JSON from queue_cli.py, then parse with Python
+    $PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" list | $PYTHON_CMD -c "
+import sys, json
+entries = json.load(sys.stdin)
+for entry in entries:
+    # Output in pipe-delimited format for shell parsing
+    print('|'.join([entry.get('path', ''), entry.get('name', ''), entry.get('date', ''), entry.get('status', ''), entry.get('attendees', '')]))
+" | while IFS='|' read -r raw_mkv_path meeting_name meeting_date status attendees; do
+        # Skip empty entries
         if [ -z "$status" ] || [ -z "$meeting_date" ] || [ -z "$meeting_name" ] || [ -z "$raw_mkv_path" ]; then
-            echo "⚠️  Skipping malformed entry: $raw_mkv_path;$meeting_name;$meeting_date;$status" >&2
             continue
         fi
         
@@ -527,18 +536,16 @@ function show_status() {
         esac
         
         printf "%-12s │ %-10s │ %-20s │ %-10s │ %s\n" "$STATUS_ICON" "$meeting_date" "$DISPLAY_NAME" "$SIZE_DISPLAY" "$(basename "$LOCATION")"
-    done < "$QUEUE_FILE"
+    done
     
     echo "─────────────┴────────────┴──────────────────────┴────────────┴─────────────────"
     
-    # Summary statistics
+    # Summary statistics using queue_cli.py
     TOTAL_SIZE_MB=$((TOTAL_SIZE / 1024 / 1024))
-    RECORDED_COUNT=$(grep -cE ';recorded(;|$)' "$QUEUE_FILE" 2>/dev/null || echo "0")
-    PROCESSED_COUNT=$(grep -cE ';processed(;|$)' "$QUEUE_FILE" 2>/dev/null || echo "0")
-    
-    # Clean up counts (remove any newlines/whitespace) and ensure they're valid integers
-    RECORDED_COUNT=$(echo "$RECORDED_COUNT" | tr -d '\n\r' | grep -o '[0-9]*' | head -1)
-    PROCESSED_COUNT=$(echo "$PROCESSED_COUNT" | tr -d '\n\r' | grep -o '[0-9]*' | head -1)
+    RECORDED_COUNT=$($PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" list recorded | $PYTHON_CMD -c "import sys, json; print(len(json.load(sys.stdin)))")
+    PROCESSED_COUNT=$($PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" list processed | $PYTHON_CMD -c "import sys, json; print(len(json.load(sys.stdin)))")
+
+    # Ensure counts are valid integers
     RECORDED_COUNT=${RECORDED_COUNT:-0}
     PROCESSED_COUNT=${PROCESSED_COUNT:-0}
     
@@ -612,17 +619,25 @@ function discard_recording() {
     fi
 
     # Case 2: Select a queued recording to discard.
-    if [ ! -f "$QUEUE_FILE" ] || ! grep -qE ';recorded(;|$)' "$QUEUE_FILE"; then
+    # Check if there are any recorded entries using queue_cli.py
+    RECORDED_COUNT=$($PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" list recorded | $PYTHON_CMD -c "import sys, json; print(len(json.load(sys.stdin)))")
+    if [ "$RECORDED_COUNT" -eq 0 ]; then
         echo "No queued recordings to discard."
         return
     fi
 
     echo "Select a recording to discard:"
-    # Create array of options in a portable way (compatible with zsh and bash)
+    # Create array of options using queue_cli.py (portable for zsh and bash)
     options=()
     while IFS= read -r line; do
         options+=("$line")
-    done < <(grep -E ';recorded(;|$)' "$QUEUE_FILE")
+    done < <($PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" list recorded | $PYTHON_CMD -c "
+import sys, json
+entries = json.load(sys.stdin)
+for entry in entries:
+    # Output in format: path|name|date|status for shell parsing
+    print('|'.join([entry.get('path', ''), entry.get('name', ''), entry.get('date', ''), entry.get('status', '')]))
+")
 
     # Use a select loop to create a menu.
     select opt in "${options[@]}" "Quit"; do
@@ -631,8 +646,8 @@ function discard_recording() {
             break
         fi
 
-        # Extract details from the selected line
-        IFS=';' read -r raw_mkv_path meeting_name meeting_date status <<< "$opt"
+        # Extract details from the selected line (pipe-delimited)
+        IFS='|' read -r raw_mkv_path meeting_name meeting_date status <<< "$opt"
 
         read -p "Are you sure you want to discard '$meeting_name' and delete its recording file? [y/N] " -n 1 -r
         echo
@@ -647,12 +662,14 @@ function discard_recording() {
                 echo "Warning: Recording file not found at '$raw_mkv_path'."
             fi
 
-            # Update status in queue file to 'discarded'
-            ESCAPED_PATH=$(printf '%s\n' "$raw_mkv_path" | sed 's:[][\\/.^$*]:\\&:g')
-            sed -i.bak "s/$ESCAPED_PATH;$meeting_name;$meeting_date;recorded/$ESCAPED_PATH;$meeting_name;$meeting_date;discarded/" "$QUEUE_FILE"
-            rm "$QUEUE_FILE.bak"
+            # Update status in queue using queue_cli.py
+            $PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" discard "$raw_mkv_path"
 
-            echo "'$meeting_name' has been discarded."
+            if [ $? -eq 0 ]; then
+                echo "'$meeting_name' has been discarded."
+            else
+                echo "Error: Failed to update queue status."
+            fi
             break
         else
             echo "Discard cancelled."
