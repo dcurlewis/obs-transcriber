@@ -5,13 +5,17 @@ Recording controller for managing OBS recordings and processing queue
 
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
 from datetime import datetime
-import csv
 import threading
 import logging
 from logging.handlers import TimedRotatingFileHandler
+
+# Add scripts directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+from queue_manager import QueueManager
 
 # Configure logging for processing
 LOG_DIR = Path(__file__).parent.parent / 'logs'
@@ -47,10 +51,19 @@ class RecordingController:
         self.project_root = Path(__file__).parent.parent
         self.pending_file = self.project_root / '.pending_meeting'
         self.queue_file = self.project_root / 'processing_queue.csv'
+        self.queue_manager = QueueManager(self.queue_file)
         self.obs_controller = self.project_root / 'scripts' / 'obs_controller.py'
         self.python_cmd = self._get_python_cmd()
         self.log_dir = self.project_root / 'logs'
         self.log_dir.mkdir(exist_ok=True)
+
+        # Validate queue at startup
+        try:
+            self.queue_manager.validate()
+        except ValueError as e:
+            # Log validation error but don't crash web app
+            processing_logger.error(f"Queue validation failed: {e}")
+            processing_logger.error("Web UI may have issues accessing queue until fixed")
         
     def _get_python_cmd(self):
         """Get the Python command to use (prefer venv)"""
@@ -104,23 +117,20 @@ class RecordingController:
                 print(f"Error reading pending file: {e}")
         
         # Get queue info
-        if self.queue_file.exists():
-            try:
-                with open(self.queue_file, 'r') as f:
-                    reader = csv.reader(f, delimiter=';')
-                    for row in reader:
-                        if len(row) >= 4:
-                            status['queue'].append({
-                                'path': row[0],
-                                'name': row[1],
-                                'date': row[2],
-                                'status': row[3]
-                            })
-                
-                # Sort by date descending (newest first)
-                status['queue'].sort(key=lambda x: x['date'], reverse=True)
-            except Exception as e:
-                print(f"Error reading queue file: {e}")
+        try:
+            entries = self.queue_manager.read_queue()
+            for entry in entries:
+                status['queue'].append({
+                    'path': entry['path'],
+                    'name': entry['name'],
+                    'date': entry['date'],
+                    'status': entry['status']
+                })
+
+            # Sort by date descending (newest first)
+            status['queue'].sort(key=lambda x: x['date'], reverse=True)
+        except Exception as e:
+            processing_logger.error(f"Error reading queue: {e}")
         
         return status
     
@@ -224,10 +234,19 @@ class RecordingController:
                     'error': f"Could not find recording file in {recording_path}"
                 }
             
-            # Add to queue (including attendees as 5th field)
-            self.queue_file.touch(exist_ok=True)
-            with open(self.queue_file, 'a') as f:
-                f.write(f"{latest_recording};{meeting_name};{meeting_date};recorded;{attendees}\n")
+            # Add to queue using QueueManager with atomic operations
+            with self.queue_manager.atomic_update() as entries:
+                entries.append({
+                    'path': latest_recording,
+                    'name': meeting_name,
+                    'date': meeting_date,
+                    'status': 'recorded',
+                    'attendees': attendees or '',
+                    'duration': '',
+                    'size': '',
+                    'error': '',
+                    'processing_time': ''
+                })
             
             # Remove pending file
             self.pending_file.unlink()
@@ -429,11 +448,22 @@ class RecordingController:
                 'error': f"Error during abort: {str(e)}"
             }
     
-    def discard_recording(self, recording_id):
-        """Discard a recording from the queue"""
-        # This would require implementing the discard logic
-        # For now, return not implemented
-        return {
-            'success': False,
-            'error': 'Discard functionality not yet implemented'
-        }
+    def discard_recording(self, recording_path):
+        """Discard a recording by marking it as discarded in queue"""
+        try:
+            with self.queue_manager.atomic_update() as entries:
+                found = False
+                for entry in entries:
+                    if entry['path'] == recording_path:
+                        entry['status'] = 'discarded'
+                        found = True
+                        break
+
+                if not found:
+                    return {'success': False, 'error': 'Recording not found in queue'}
+
+            return {'success': True, 'message': f'Recording marked as discarded'}
+
+        except Exception as e:
+            processing_logger.error(f"Error discarding recording: {e}")
+            return {'success': False, 'error': f'Failed to discard recording: {str(e)}'}
