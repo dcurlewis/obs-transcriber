@@ -1,25 +1,6 @@
 import obsws_python as obs
 import sys
-import os
-from dotenv import load_dotenv
-
-# --- Configuration ---
-def get_config():
-    """Loads configuration from .env file and falls back to environment variables."""
-    # Load .env file from the project root.
-    # Assumes script is run from root or from the scripts/ directory.
-    dotenv_path = os.path.join(os.path.dirname(__file__), '..', '.env')
-    if os.path.exists(dotenv_path):
-        load_dotenv(dotenv_path=dotenv_path)
-    else:
-        # If not found, try loading from current dir (for running from root)
-        load_dotenv()
-
-    return {
-        "host": os.environ.get('OBS_HOST', 'localhost'),
-        "port": int(os.environ.get('OBS_PORT', 4455)),
-        "password": os.environ.get('OBS_PASSWORD', 'your_obs_websocket_password')
-    }
+from config import get_config
 
 def main():
     if len(sys.argv) < 2:
@@ -27,10 +8,10 @@ def main():
         sys.exit(1)
 
     command = sys.argv[1]
-    config = get_config()
+    config = get_config()  # Validates on first call
 
     try:
-        client = obs.ReqClient(host=config['host'], port=config['port'], password=config['password'])
+        client = obs.ReqClient(host=config.obs_host, port=config.obs_port, password=config.obs_password)
     except ConnectionRefusedError:
         print("Error: Connection refused. Is OBS running and the websocket plugin enabled?")
         sys.exit(1)
