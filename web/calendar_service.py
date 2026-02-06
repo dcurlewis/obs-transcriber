@@ -7,8 +7,13 @@ Uses EventKit to read calendar data that's already synced to your Mac
 import os
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 import pytz
 from tzlocal import get_localzone
+
+# Add scripts directory to path for Config import
+sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+from config import get_config
 
 # Try to import EventKit (macOS only)
 try:
@@ -28,13 +33,15 @@ class CalendarService:
     
     def __init__(self):
         self.event_store = None
+        # Load configuration
+        self.config = get_config()
         # Automatically detect system timezone
         try:
             self.local_tz = get_localzone()
         except Exception:
             # Fallback to UTC if detection fails
             self.local_tz = pytz.UTC
-        
+
         if EVENTKIT_AVAILABLE:
             self._initialize_event_store()
     
@@ -137,13 +144,13 @@ class CalendarService:
                 for att in attendees:
                     email = str(att.emailAddress()).lower() if att.emailAddress() else ""
                     # Filter out my own email
-                    if email and "dbdave@canva.com" not in email:
+                    if email and self.config.user_email.lower() not in email:
                         other_attendees.append(att)
-                
+
                 # Skip if no other attendees besides myself
                 if len(other_attendees) == 0:
                     if os.environ.get('DEBUG_CALENDAR') == 'true':
-                        print(f"[DEBUG]   -> Skipped: No other attendees besides dbdave@canva.com")
+                        print(f"[DEBUG]   -> Skipped: No other attendees besides {self.config.user_email}")
                     continue
                 
                 # Look for Zoom link specifically (only Zoom is used)
