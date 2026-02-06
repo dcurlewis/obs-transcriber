@@ -18,4 +18,4 @@ recordings/
 # State files
 .pending_meeting
 processing_queue.csv
-*.bak 
+*.bak .planning/
