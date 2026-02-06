@@ -124,6 +124,62 @@ class QueueManager:
                 pass
             f.close()
 
+    def _parse_entries_from_file(self, f) -> List[Dict[str, str]]:
+        """
+        Parse queue entries from an open file handle
+
+        Internal helper to avoid code duplication between read_queue and atomic_update.
+
+        Args:
+            f: Open file handle positioned at start
+
+        Returns:
+            List of queue entries
+
+        Raises:
+            csv.Error: If CSV parsing fails
+        """
+        # Detect format by checking first line
+        first_line = f.readline()
+        f.seek(0)
+
+        has_header = (
+            'path' in first_line.lower() and
+            'status' in first_line.lower()
+        ) if first_line else False
+
+        entries = []
+
+        if has_header:
+            # New format: CSV with DictReader
+            reader = csv.DictReader(f)
+            for row in reader:
+                # Fill missing fields with defaults
+                entry = {field: row.get(field, '') for field in self.FIELDNAMES}
+                entries.append(entry)
+        elif first_line:
+            # Legacy format: semicolon-delimited, no header
+            reader = csv.reader(f, delimiter=';')
+            for row in reader:
+                if len(row) < 4:
+                    continue  # Skip malformed rows
+
+                # Map legacy fields to new schema
+                entry = {
+                    'path': row[0],
+                    'name': row[1],
+                    'date': row[2],
+                    'status': row[3],
+                    'attendees': row[4] if len(row) > 4 else '',
+                    'duration': '',
+                    'size': '',
+                    'error': '',
+                    'processing_time': ''
+                }
+                entries.append(entry)
+
+        return entries
+
     def read_queue(self) -> List[Dict[str, str]]:
         """
         Read queue with backwards compatibility for legacy format
@@ -141,56 +197,15 @@ class QueueManager:
         if not self.queue_path.exists():
             return []
 
-        entries = []
-
         with self._lock('r') as f:
-            # Detect format by checking first line
-            first_line = f.readline()
-            f.seek(0)
-
-            # Check if first line is a header (contains field names)
-            has_header = (
-                'path' in first_line.lower() and
-                'status' in first_line.lower()
-            )
-
             try:
-                if has_header:
-                    # New format: CSV with DictReader
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        # Fill missing fields with defaults
-                        entry = {field: row.get(field, '') for field in self.FIELDNAMES}
-                        entries.append(entry)
-                else:
-                    # Legacy format: semicolon-delimited, no header
-                    reader = csv.reader(f, delimiter=';')
-                    for row in reader:
-                        if len(row) < 4:
-                            continue  # Skip malformed rows
-
-                        # Map legacy fields to new schema
-                        entry = {
-                            'path': row[0],
-                            'name': row[1],
-                            'date': row[2],
-                            'status': row[3],
-                            'attendees': row[4] if len(row) > 4 else '',
-                            'duration': '',
-                            'size': '',
-                            'error': '',
-                            'processing_time': ''
-                        }
-                        entries.append(entry)
-
+                return self._parse_entries_from_file(f)
             except csv.Error as e:
                 raise ValueError(
                     f"CSV parsing error in {self.queue_path}: {e}\n"
                     f"Queue file may be corrupted. Check {self.backup_path} for last good state.\n"
                     f"To recover: cp {self.backup_path} {self.queue_path}"
                 )
-
-        return entries
 
     def write_queue(self, entries: List[Dict[str, str]]):
         """
@@ -273,41 +288,9 @@ class QueueManager:
 
         # Acquire exclusive lock for entire read-modify-write operation
         with self._lock('r+') as f:
-            # Read current queue
-            first_line = f.readline()
-            f.seek(0)
-
-            has_header = (
-                'path' in first_line.lower() and
-                'status' in first_line.lower()
-            ) if first_line else False
-
-            entries = []
+            # Read current queue using shared parsing logic
             try:
-                if has_header:
-                    reader = csv.DictReader(f)
-                    for row in reader:
-                        entry = {field: row.get(field, '') for field in self.FIELDNAMES}
-                        entries.append(entry)
-                elif first_line:
-                    # Legacy format
-                    f.seek(0)
-                    reader = csv.reader(f, delimiter=';')
-                    for row in reader:
-                        if len(row) < 4:
-                            continue
-                        entry = {
-                            'path': row[0],
-                            'name': row[1],
-                            'date': row[2],
-                            'status': row[3],
-                            'attendees': row[4] if len(row) > 4 else '',
-                            'duration': '',
-                            'size': '',
-                            'error': '',
-                            'processing_time': ''
-                        }
-                        entries.append(entry)
+                entries = self._parse_entries_from_file(f)
             except csv.Error as e:
                 raise ValueError(f"CSV parsing error: {e}")
 
