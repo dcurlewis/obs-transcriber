@@ -17,6 +17,13 @@ from pathlib import Path
 from dotenv import load_dotenv
 from colorama import Fore, Style, just_fix_windows_console
 
+# Add scripts directory to sys.path to support direct execution
+_scripts_dir = Path(__file__).parent
+if str(_scripts_dir) not in sys.path:
+    sys.path.insert(0, str(_scripts_dir))
+
+from root_detection import find_project_root
+
 # Initialize colorama for Windows compatibility
 just_fix_windows_console()
 
@@ -39,14 +46,14 @@ class Config:
 
     def __init__(self):
         """Load and validate configuration from environment variables"""
+        self.project_root = find_project_root()
         self._load_dotenv()
         self._load_and_validate()
 
     def _load_dotenv(self):
         """Load .env file if it exists (optional)"""
         # Find .env in project root
-        project_root = Path(__file__).parent.parent
-        dotenv_path = project_root / '.env'
+        dotenv_path = self.project_root / '.env'
 
         # Load .env file if it exists (environment variables take precedence)
         if dotenv_path.exists():
@@ -145,6 +152,62 @@ class Config:
             return default
         return value.lower() in ('true', '1', 'yes', 'on')
 
+    def _resolve_path(self, path_str):
+        """Resolve path string with tilde expansion and root-relative resolution
+
+        Args:
+            path_str: Path string from configuration (may include ~, relative, or absolute)
+
+        Returns:
+            Path: Resolved absolute path
+
+        Resolution order:
+        1. Expand tilde (~) to home directory
+        2. If not absolute, resolve relative to project root
+        3. Normalize path (resolve symlinks, .., etc.)
+        """
+        # Expand tilde first
+        path = Path(path_str).expanduser()
+
+        # If not absolute, resolve relative to project root
+        if not path.is_absolute():
+            path = self.project_root / path
+
+        # Normalize path (resolve symlinks, .., etc.)
+        return path.resolve()
+
+    def _path_error(self, key, original_value, resolved_path, context=None, reason=None):
+        """Format detailed path error message with colored output
+
+        Args:
+            key: Environment variable name
+            original_value: Original value from .env
+            resolved_path: Path after expansion and resolution
+            context: Optional context explaining what this path is for
+            reason: Optional reason for failure (e.g., "does not exist")
+
+        Returns:
+            str: Formatted error message
+        """
+        msg = f"{Fore.RED}{Style.BRIGHT}{key} path error{Style.RESET_ALL}\n\n"
+        msg += f"{Style.BRIGHT}Original value:{Style.RESET_ALL} {original_value}\n"
+        msg += f"{Style.BRIGHT}Resolved to:{Style.RESET_ALL} {resolved_path}\n"
+        msg += f"{Style.BRIGHT}Project root:{Style.RESET_ALL} {self.project_root}\n"
+
+        if reason:
+            msg += f"\n{Fore.RED}Error: {reason}{Style.RESET_ALL}\n"
+
+        if context:
+            msg += f"\n{context}\n"
+
+        msg += f"\n{Style.BRIGHT}Suggestions:{Style.RESET_ALL}\n"
+        msg += f"  • Check the path in your .env file\n"
+        msg += f"  • Relative paths are resolved from project root: {self.project_root}\n"
+        msg += f"  • Use absolute paths or ~/ for home directory\n"
+        msg += f"  • See .env.example for configuration template\n"
+
+        return msg
+
     def _get_path(self, key, must_exist=False, context=None):
         """Get and validate path environment variable
 
@@ -155,7 +218,7 @@ class Config:
             context: Optional context explaining what this path is for
 
         Returns:
-            Path object with expanded home directory
+            Path object with expanded home directory and resolved relative to project root
 
         Raises:
             ConfigError: If path is not set or doesn't exist (when must_exist=True)
@@ -169,15 +232,18 @@ class Config:
             msg += f"\nCopy .env.example to .env and set {key}"
             raise ConfigError(msg)
 
-        # Expand ~ to home directory
-        path = Path(value).expanduser()
+        # Resolve path (tilde expansion + root-relative resolution)
+        path = self._resolve_path(value)
 
         if must_exist and not path.exists():
-            msg = f"{key} path does not exist: {path}"
-            if context:
-                msg += f"\n{context}."
-            msg += "\n\nPlease create the directory or update the path in .env"
-            raise ConfigError(msg)
+            error_msg = self._path_error(
+                key,
+                original_value=value,
+                resolved_path=path,
+                context=context,
+                reason="Path does not exist"
+            )
+            raise ConfigError(error_msg)
 
         # Create output directories automatically
         if not must_exist and not path.exists():
