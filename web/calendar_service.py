@@ -5,14 +5,22 @@ Uses EventKit to read calendar data that's already synced to your Mac
 """
 
 import os
-import sys
 from datetime import datetime, timedelta
-from pathlib import Path
 import pytz
 from tzlocal import get_localzone
 
-# Add scripts directory to path for Config import
-sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+# Bootstrap: Add project root to path for root_detection import
+from pathlib import Path
+import sys
+_root = Path(__file__).parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
+# Configure imports using centralized setup
+from scripts.root_detection import setup_project_imports
+setup_project_imports()
+
+# Import project modules
 from config import get_config
 
 # Try to import EventKit (macOS only)
