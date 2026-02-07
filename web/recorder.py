@@ -25,6 +25,7 @@ setup_project_imports()
 # Import project modules
 from queue_manager import QueueManager
 from root_detection import find_project_root
+from log_sanitizer import SensitiveDataFilter
 
 # Configure logging for processing
 LOG_DIR = find_project_root() / 'logs'
@@ -46,6 +47,11 @@ file_handler = TimedRotatingFileHandler(
 file_handler.setLevel(logging.INFO)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 file_handler.suffix = '%Y-%m-%d'  # Backup files named: processing.log.2026-02-03
+
+# Apply sanitization filter to protect sensitive data (PRIV-02)
+project_root = find_project_root()
+file_handler.addFilter(SensitiveDataFilter(project_root))
+
 processing_logger.addHandler(file_handler)
 
 

@@ -16,8 +16,13 @@ if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
 # Configure imports using centralized setup
-from scripts.root_detection import setup_project_imports
+from scripts.root_detection import setup_project_imports, find_project_root
 setup_project_imports()
+
+# Configure logging with sanitization (PRIV-02)
+from scripts.log_sanitizer import setup_sanitized_logging
+import logging
+setup_sanitized_logging(find_project_root())
 
 # Import our modules
 from web.recorder import RecordingController
