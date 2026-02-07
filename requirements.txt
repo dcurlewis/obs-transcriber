@@ -10,4 +10,6 @@ icalendar>=5.0.0
 pytz
 tzlocal
 requests
-pyobjc-framework-EventKit>=10.0 
+pyobjc-framework-EventKit>=10.0
+pytest>=9.0
+pytest-cov>=7.0 
