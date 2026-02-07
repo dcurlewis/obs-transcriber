@@ -19,13 +19,14 @@ Usage examples:
 import sys
 import json
 from pathlib import Path
+from root_detection import find_project_root
 from queue_manager import QueueManager
 
 
 def main():
     """Main entry point for CLI"""
-    # Get project root (parent of scripts directory)
-    project_root = Path(__file__).parent.parent
+    # Get project root using centralized root detection
+    project_root = find_project_root()
     queue_path = project_root / 'processing_queue.csv'
     manager = QueueManager(queue_path)
 
