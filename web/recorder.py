@@ -464,8 +464,9 @@ class RecordingController:
             }
     
     def discard_recording(self, recording_path):
-        """Discard a recording by marking it as discarded in queue"""
+        """Discard a recording by marking it as discarded in queue and deleting the file"""
         try:
+            # Update queue status first (safer - prevents re-processing if deletion fails)
             with self.queue_manager.atomic_update() as entries:
                 found = False
                 for entry in entries:
@@ -477,7 +478,33 @@ class RecordingController:
                 if not found:
                     return {'success': False, 'error': 'Recording not found in queue'}
 
-            return {'success': True, 'message': f'Recording marked as discarded'}
+            # Delete physical file after queue update (safer order)
+            if os.path.exists(recording_path):
+                try:
+                    os.remove(recording_path)
+                    processing_logger.info(f"Deleted discarded recording: {Path(recording_path).name}")
+                except PermissionError:
+                    processing_logger.error(
+                        f"Permission denied deleting file: {Path(recording_path).name}\n"
+                        f"File marked as discarded in queue. Manually delete: {recording_path}"
+                    )
+                    return {
+                        'success': True,
+                        'message': 'Recording marked as discarded (file deletion failed - check permissions)',
+                        'warning': 'Could not delete file due to permissions'
+                    }
+                except OSError as e:
+                    processing_logger.error(f"Error deleting file: {e}")
+                    return {
+                        'success': True,
+                        'message': 'Recording marked as discarded (file deletion failed)',
+                        'warning': str(e)
+                    }
+            else:
+                processing_logger.warning(f"Recording file not found (may already be deleted): {Path(recording_path).name}")
+                # Still success - queue is updated
+
+            return {'success': True, 'message': 'Recording discarded and file deleted'}
 
         except Exception as e:
             processing_logger.error(f"Error discarding recording: {e}")
