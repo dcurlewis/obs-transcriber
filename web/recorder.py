@@ -5,20 +5,29 @@ Recording controller for managing OBS recordings and processing queue
 
 import os
 import subprocess
-import sys
 import time
-from pathlib import Path
 from datetime import datetime
 import threading
 import logging
 from logging.handlers import TimedRotatingFileHandler
 
-# Add scripts directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent.parent / 'scripts'))
+# Bootstrap: Add project root to path for root_detection import
+from pathlib import Path
+import sys
+_root = Path(__file__).parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
+# Configure imports using centralized setup
+from scripts.root_detection import setup_project_imports
+setup_project_imports()
+
+# Import project modules
 from queue_manager import QueueManager
+from root_detection import find_project_root
 
 # Configure logging for processing
-LOG_DIR = Path(__file__).parent.parent / 'logs'
+LOG_DIR = find_project_root() / 'logs'
 LOG_DIR.mkdir(exist_ok=True)
 
 # Set up file handler for processing logs with weekly rotation
@@ -48,7 +57,7 @@ class RecordingController:
     _processing_lock = threading.Lock()
     
     def __init__(self):
-        self.project_root = Path(__file__).parent.parent
+        self.project_root = find_project_root()
         self.pending_file = self.project_root / '.pending_meeting'
         self.queue_file = self.project_root / 'processing_queue.csv'
         self.queue_manager = QueueManager(self.queue_file)
