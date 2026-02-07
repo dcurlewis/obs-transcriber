@@ -297,7 +297,7 @@ class MeetingTranscriber {
                     const hour = item.date.substring(9, 11);
                     const minute = item.date.substring(11, 13);
                     const dateObj = new Date(year, month - 1, day, hour, minute);
-                    formattedDate = dateObj.toLocaleDateString('en-US', { 
+                    formattedDate = dateObj.toLocaleDateString('en-US', {
                         month: 'short', day: 'numeric', year: 'numeric',
                         hour: 'numeric', minute: '2-digit'
                     });
@@ -305,7 +305,20 @@ class MeetingTranscriber {
             } catch (e) {
                 // Use original if parsing fails
             }
-            
+
+            // Add discard button for pending recordings
+            let actionButtons = '';
+            if (item.status === 'recorded') {
+                actionButtons = `
+                    <div class="queue-actions">
+                        <button class="btn btn-danger btn-small"
+                                onclick="app.discardRecording('${this.escapeHtml(item.path)}', '${this.escapeHtml(item.name)}')">
+                            <span class="icon">🗑️</span> Discard
+                        </button>
+                    </div>
+                `;
+            }
+
             return `
                 <div class="queue-item">
                     <div class="queue-info">
@@ -315,6 +328,7 @@ class MeetingTranscriber {
                         <span class="queue-separator">•</span>
                         <span class="queue-date">${formattedDate}</span>
                     </div>
+                    ${actionButtons}
                 </div>
             `;
         }).join('');
@@ -413,14 +427,14 @@ class MeetingTranscriber {
         if (!confirm('Are you sure you want to abort this recording? The video file will be deleted.')) {
             return;
         }
-        
+
         try {
             const response = await fetch('/api/abort', {
                 method: 'POST',
             });
-            
+
             const result = await response.json();
-            
+
             if (result.success) {
                 this.showToast('Recording aborted (file deleted)', 'success');
                 // Refresh both status and meetings to update button states
@@ -431,6 +445,50 @@ class MeetingTranscriber {
             }
         } catch (error) {
             this.showToast('Error aborting recording: ' + error.message, 'error');
+        }
+    }
+
+    async discardRecording(recordingPath, meetingName) {
+        // Confirm before discarding
+        if (!confirm(`Are you sure you want to discard "${meetingName}"? The recording file will be deleted.`)) {
+            return;
+        }
+
+        try {
+            const response = await fetch('/api/discard', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    recording_id: recordingPath
+                }),
+            });
+
+            const result = await response.json();
+
+            if (result.success) {
+                if (result.warning) {
+                    this.showToast(`Discarded: ${result.warning}`, 'warning');
+                } else {
+                    this.showToast('Recording discarded successfully', 'success');
+                }
+
+                // Refresh queue and check pagination
+                await this.refreshStatus();
+
+                // Adjust page if needed
+                const totalPages = Math.ceil(this.queue.length / this.queueItemsPerPage);
+                if (this.currentQueuePage > totalPages && totalPages > 0) {
+                    this.currentQueuePage = totalPages;
+                }
+
+                this.updateQueueDisplay();
+            } else {
+                this.showToast(result.error || 'Failed to discard recording', 'error');
+            }
+        } catch (error) {
+            this.showToast('Error discarding recording: ' + error.message, 'error');
         }
     }
     
