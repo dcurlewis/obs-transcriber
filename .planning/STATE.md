@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Core value:** The transcription pipeline should work reliably for any user without requiring code modifications - just configuration.
-**Current focus:** Phase 6 - Testing
+**Current focus:** Milestone v1.0 complete
 
 ## Current Position
 
 Phase: 6 of 6 (Testing)
-Plan: 1 of 1 in current phase
+Plan: 2 of 2 in current phase
 Status: Phase complete
-Last activity: 2026-02-07 — Completed 06-01-PLAN.md
+Last activity: 2026-02-07 — Completed 06-02-PLAN.md
 
-Progress: [██████████] 100% (Phases 1-6: 14/14 plans complete)
+Progress: [██████████] 100% (Phases 1-6: 15/15 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 14
-- Average duration: 5.1 minutes
-- Total execution time: 1.25 hours
+- Total plans completed: 15
+- Average duration: 4.9 minutes
+- Total execution time: 1.33 hours
 
 **By Phase:**
 
@@ -32,11 +32,11 @@ Progress: [██████████] 100% (Phases 1-6: 14/14 plans complet
 | 03-path-portability | 3/3 | 6min | 2.0min |
 | 04-error-handling-&-validation | 3/3 | 6min | 2.0min |
 | 05-functionality-completion | 1/1 | 15min | 15.0min |
-| 06-testing | 1/1 | 4min | 4.0min |
+| 06-testing | 2/2 | 7min | 3.5min |
 
 **Recent Trend:**
-- Last 5 plans: 04-02 (2min), 04-03 (2min), 05-01 (15min), 06-01 (4min)
-- Trend: Testing infrastructure setup efficient, comprehensive test coverage added
+- Last 5 plans: 04-03 (2min), 05-01 (15min), 06-01 (4min), 06-02 (3min)
+- Trend: All phases complete - testing infrastructure efficient, full test coverage achieved
 
 *Updated after each plan completion*
 
@@ -112,6 +112,10 @@ Recent decisions affecting current work:
 - **pytest infrastructure with coverage** — ✅ Implemented in 06-01 (pytest.ini, conftest.py, 41 tests passing)
 - **Config validation tests (TEST-02)** — ✅ Implemented in 06-01 (94% coverage, 12 tests)
 - **Path resolution tests (TEST-03)** — ✅ Implemented in 06-01 (92% coverage, 11 tests)
+- **Mock external dependencies** — ✅ Implemented in 06-02 (unittest.mock for subprocess, OBS, file ops)
+- **Pipeline integration tests (TEST-04)** — ✅ Implemented in 06-02 (15 tests, end-to-end workflow)
+- **GitHub Actions CI workflow** — ✅ Implemented in 06-02 (automated testing on push/PR)
+- **macOS CI runner** — ✅ Implemented in 06-02 (EventKit compatibility, full test coverage)
 
 ### Pending Todos
 
@@ -124,14 +128,15 @@ None yet.
   - Currently requires CLI: `./run.sh stop`
   - Does not affect queue integrity or CLI functionality
   - Future improvement: Add stop button to web UI
-- Discard button styling needs improvement (noted in 05-01)
-  - Bright red clashes with color scheme, needs better spacing
-  - Functional correctness verified, styling is cosmetic
-  - Future enhancement: Adjust color scheme and spacing CSS
+- ✅ Discard button styling improved (commit a99e936)
+  - Changed from bright red (#ef4444) to muted amber (#f59e0b)
+  - Added 16px left margin for better spacing from date/time
+  - Color now matches pending status, integrates with UI
+  - Resolved before milestone completion
 
 ## Session Continuity
 
-Last session: 2026-02-07 (plan 06-01 execution)
-Stopped at: Completed 06-01-PLAN.md (Test Infrastructure & Config/Path Tests)
+Last session: 2026-02-07 (plan 06-02 execution)
+Stopped at: Completed 06-02-PLAN.md (Pipeline Integration Tests & CI)
 Resume file: None
-Next: All phases complete! (14/14 plans finished). Test infrastructure established with pytest, comprehensive config validation tests (TEST-02), and path resolution tests (TEST-03). Project now has automated regression protection for configuration management and path portability. Ready for additional testing priorities or other work.
+Next: ALL PHASES COMPLETE! (15/15 plans finished). Complete test suite with 56 tests covering all critical functionality (TEST-01 through TEST-04). CI automation provides regression protection. Project ready for production use and future development with confidence.
