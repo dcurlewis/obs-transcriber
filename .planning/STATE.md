@@ -5,23 +5,23 @@
 See: .planning/PROJECT.md (updated 2026-02-07)
 
 **Core value:** The transcription pipeline should work reliably for any user without requiring code modifications - just configuration.
-**Current focus:** Phase 4 - Error Handling & Validation
+**Current focus:** Phase 6 - Testing
 
 ## Current Position
 
-Phase: 4 of 6 (Error Handling & Validation)
-Plan: 3 of 3 in current phase
+Phase: 6 of 6 (Testing)
+Plan: 1 of 1 in current phase
 Status: Phase complete
-Last activity: 2026-02-07 — Completed 04-03-PLAN.md
+Last activity: 2026-02-07 — Completed 06-01-PLAN.md
 
-Progress: [██████████] 100% (Phases 1-4: 12/12 plans complete)
+Progress: [██████████] 100% (Phases 1-6: 14/14 plans complete)
 
 ## Performance Metrics
 
 **Velocity:**
-- Total plans completed: 12
-- Average duration: 4.2 minutes
-- Total execution time: 0.85 hours
+- Total plans completed: 14
+- Average duration: 5.1 minutes
+- Total execution time: 1.25 hours
 
 **By Phase:**
 
@@ -31,10 +31,12 @@ Progress: [██████████] 100% (Phases 1-4: 12/12 plans complet
 | 02-configuration-management | 3/3 | 18min | 6.0min |
 | 03-path-portability | 3/3 | 6min | 2.0min |
 | 04-error-handling-&-validation | 3/3 | 6min | 2.0min |
+| 05-functionality-completion | 1/1 | 15min | 15.0min |
+| 06-testing | 1/1 | 4min | 4.0min |
 
 **Recent Trend:**
-- Last 5 plans: 03-03 (2min), 04-01 (2min), 04-02 (2min), 04-03 (2min)
-- Trend: Maintaining fast execution - infrastructure work continues at 2.0min/plan average
+- Last 5 plans: 04-02 (2min), 04-03 (2min), 05-01 (15min), 06-01 (4min)
+- Trend: Testing infrastructure setup efficient, comprehensive test coverage added
 
 *Updated after each plan completion*
 
@@ -97,9 +99,19 @@ Recent decisions affecting current work:
 - **Formatted error messages** — ✅ Implemented in 04-03 (troubleshooting steps matching config.py pattern)
 - **Fail-fast audio validation** — ✅ Implemented in 04-03 (before transcription starts)
 
-**Pending (Future Phases):**
-- Core pipeline tests only — Pending Phase 6 (Testing)
-- Keep macOS-only calendar — Cross-platform out of scope
+**Phase 5 (Functionality Completion) - Complete:**
+- **File deletion after queue update** — ✅ Implemented in 05-01 (safer order for data integrity)
+- **Follow abort pattern for consistency** — ✅ Implemented in 05-01 (web UI destructive actions)
+- **Partial success with warnings** — ✅ Implemented in 05-01 (permission errors don't fail operation)
+- **escapeHtml() for XSS prevention** — ✅ Implemented in 05-01 (user-controlled data in onclick handlers)
+
+**Phase 6 (Testing) - Complete:**
+- **Mock find_project_root() in config tests** — ✅ Implemented in 06-01 (prevents loading real .env)
+- **Bootstrap imports in conftest.py** — ✅ Implemented in 06-01 (all tests can import from scripts/)
+- **Clear _cached_root between tests** — ✅ Implemented in 06-01 (ensures clean state for root detection tests)
+- **pytest infrastructure with coverage** — ✅ Implemented in 06-01 (pytest.ini, conftest.py, 41 tests passing)
+- **Config validation tests (TEST-02)** — ✅ Implemented in 06-01 (94% coverage, 12 tests)
+- **Path resolution tests (TEST-03)** — ✅ Implemented in 06-01 (92% coverage, 11 tests)
 
 ### Pending Todos
 
@@ -107,15 +119,19 @@ None yet.
 
 ### Blockers/Concerns
 
-**Web UI UX issue (non-blocking):**
+**Web UI UX issues (non-blocking):**
 - Ad-hoc recordings started from web UI cannot be stopped from web UI
-- Currently requires CLI: `./run.sh stop`
-- Does not affect queue integrity or CLI functionality
-- Future improvement: Add stop button to web UI
+  - Currently requires CLI: `./run.sh stop`
+  - Does not affect queue integrity or CLI functionality
+  - Future improvement: Add stop button to web UI
+- Discard button styling needs improvement (noted in 05-01)
+  - Bright red clashes with color scheme, needs better spacing
+  - Functional correctness verified, styling is cosmetic
+  - Future enhancement: Adjust color scheme and spacing CSS
 
 ## Session Continuity
 
-Last session: 2026-02-07 (plan 04-03 execution)
-Stopped at: Completed 04-03-PLAN.md (Audio Validation)
+Last session: 2026-02-07 (plan 06-01 execution)
+Stopped at: Completed 06-01-PLAN.md (Test Infrastructure & Config/Path Tests)
 Resume file: None
-Next: Phase 4 complete (3/3 plans finished). Error handling & validation foundation complete - dependency checking, logging sanitization, and audio validation all in place with fail-fast behavior and actionable error messages. Ready for Phase 5 or next priorities.
+Next: All phases complete! (14/14 plans finished). Test infrastructure established with pytest, comprehensive config validation tests (TEST-02), and path resolution tests (TEST-03). Project now has automated regression protection for configuration management and path portability. Ready for additional testing priorities or other work.
