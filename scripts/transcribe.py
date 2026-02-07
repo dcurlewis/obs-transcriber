@@ -16,6 +16,8 @@ except ImportError:
     print("Error: mlx-whisper is not installed. Install it with: pip install mlx-whisper")
     sys.exit(1)
 
+from audio_validator import validate_audio_file, AudioValidationError
+
 # Model mapping - maps simple names to HuggingFace repos
 # MLX-community provides optimized versions for Apple Silicon
 MODEL_MAPPING = {
@@ -73,23 +75,28 @@ def transcribe(
 ) -> Path:
     """
     Transcribe an audio file using MLX Whisper.
-    
+
     Args:
         audio_path: Path to the input audio file
         output_dir: Directory to save the output SRT file
         model: Whisper model to use (e.g., 'turbo', 'large-v3', 'base')
         language: Language code (e.g., 'en', 'es', 'fr')
         verbose: Whether to print progress information
-    
+
     Returns:
         Path to the output SRT file
     """
     audio_path = Path(audio_path)
     output_dir = Path(output_dir)
-    
-    if not audio_path.exists():
-        raise FileNotFoundError(f"Audio file not found: {audio_path}")
-    
+
+    # Validate audio file before transcription (fail-fast)
+    try:
+        validate_audio_file(audio_path)
+    except AudioValidationError as e:
+        if verbose:
+            print(str(e), file=sys.stderr)
+        raise
+
     output_dir.mkdir(parents=True, exist_ok=True)
     
     # Determine the model path
@@ -195,6 +202,9 @@ Examples:
             verbose=not args.quiet
         )
         print(output_path)  # Print path for shell script to capture
+    except AudioValidationError:
+        # Error already printed with troubleshooting steps
+        sys.exit(1)
     except FileNotFoundError as e:
         print(f"❌ Error: {e}", file=sys.stderr)
         sys.exit(1)
