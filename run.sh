@@ -32,9 +32,18 @@ else
     echo "Using system Python: $PYTHON_CMD"
 fi
 
+SCRIPTS_DIR="scripts"
+
+# --- Check Dependencies ---
+# Verify all required external tools are available before proceeding
+$PYTHON_CMD "$SCRIPTS_DIR/dependencies.py"
+if [ $? -ne 0 ]; then
+    echo "Error: Dependency check failed. Please install missing dependencies."
+    exit 1
+fi
+
 PENDING_FILE=".pending_meeting"
 QUEUE_FILE="processing_queue.csv"
-SCRIPTS_DIR="scripts"
 # Use TRANSCRIPTION_OUTPUT_DIR from .env, default to "recordings" if not set
 TRANSCRIPTION_OUTPUT_DIR_RAW=${TRANSCRIPTION_OUTPUT_DIR:-recordings}
 # Replace ~ with $HOME in the path
