@@ -219,3 +219,52 @@ The following enhancements have been made to improve the quality and usefulness 
 - **MLX Whisper**: Uses MLX Whisper, which is specifically optimized for Apple Silicon Macs using the Metal framework.
 - **Automatic GPU Utilization**: MLX automatically leverages Apple's Neural Engine and GPU for significantly faster transcription.
 - **Multiple Model Options**: Choose from various models (tiny, base, small, medium, large-v3, turbo, distil-large-v3) based on your speed/accuracy needs.
+
+## Testing
+
+The project includes automated tests for regression protection.
+
+### Running Tests Locally
+
+**Install test dependencies:**
+```bash
+pip install -r requirements.txt  # Includes pytest and pytest-cov
+```
+
+**Run all tests:**
+```bash
+pytest
+```
+
+**Run only fast unit tests:**
+```bash
+pytest -m unit
+```
+
+**Run with coverage report:**
+```bash
+pytest --cov=scripts --cov=web --cov-report=html
+open htmlcov/index.html  # View coverage report
+```
+
+**Run specific test file:**
+```bash
+pytest tests/test_queue_manager.py -v
+```
+
+### Test Organization
+
+- `tests/test_queue_manager.py` - CSV parsing, file locking, atomic writes (TEST-01)
+- `tests/test_config.py` - Configuration validation (TEST-02)
+- `tests/test_root_detection.py` - Path resolution from multiple directories (TEST-03)
+- `tests/test_pipeline_integration.py` - End-to-end transcription workflow (TEST-04)
+
+### Continuous Integration
+
+Tests run automatically on every push via GitHub Actions. The CI workflow:
+1. Runs fast unit tests (marked with `@pytest.mark.unit`)
+2. Runs integration tests (marked with `@pytest.mark.integration`)
+3. Generates coverage reports
+4. Uploads coverage to Codecov (if configured)
+
+See `.github/workflows/test.yml` for workflow configuration.
