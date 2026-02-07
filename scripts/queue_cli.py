@@ -25,6 +25,10 @@ from queue_manager import QueueManager
 
 def main():
     """Main entry point for CLI"""
+    # Check dependencies before any operations
+    from dependencies import check_dependencies
+    check_dependencies()
+
     # Get project root using centralized root detection
     project_root = find_project_root()
     queue_path = project_root / 'processing_queue.csv'

@@ -23,6 +23,10 @@ setup_project_imports()
 from web.recorder import RecordingController
 from web.calendar_service import CalendarService
 
+# Check dependencies before initializing services
+from scripts.dependencies import check_dependencies
+check_dependencies()
+
 # Load environment variables
 load_dotenv()
 
