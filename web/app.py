@@ -5,13 +5,19 @@ Provides a web UI for managing recordings and integrating with Google Calendar
 """
 
 import os
-import sys
-from pathlib import Path
 from flask import Flask, render_template, jsonify, request
 from dotenv import load_dotenv
 
-# Add parent directory to path to import from scripts
-sys.path.insert(0, str(Path(__file__).parent.parent))
+# Bootstrap: Add project root to path for root_detection import
+from pathlib import Path
+import sys
+_root = Path(__file__).parent.parent
+if str(_root) not in sys.path:
+    sys.path.insert(0, str(_root))
+
+# Configure imports using centralized setup
+from scripts.root_detection import setup_project_imports
+setup_project_imports()
 
 # Import our modules
 from web.recorder import RecordingController
