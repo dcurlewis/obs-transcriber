@@ -56,14 +56,78 @@ class CalendarService:
     def _initialize_event_store(self):
         """Initialize EventKit event store and request calendar access"""
         self.event_store = EKEventStore.alloc().init()
-        
+
         # Request access to calendars (will prompt user first time)
         # Note: This is synchronous in newer macOS versions
         granted = self.event_store.requestFullAccessToEventsWithCompletion_(None)
-        
+
         if not granted:
             print("Calendar access not granted. The app needs permission to read your calendar.")
             print("Go to System Settings > Privacy & Security > Calendars and enable access.")
+
+    def _filter_calendars(self, calendars):
+        """
+        Filter calendars based on CALENDAR_INCLUDE or CALENDAR_EXCLUDE config.
+        Returns filtered list of calendars to query.
+        """
+        # Get calendar filter settings from environment
+        include_calendars = os.environ.get('CALENDAR_INCLUDE', '').strip()
+        exclude_calendars = os.environ.get('CALENDAR_EXCLUDE', '').strip()
+
+        # If no filtering configured, return all calendars
+        if not include_calendars and not exclude_calendars:
+            return calendars
+
+        filtered = []
+
+        for cal in calendars:
+            calendar_title = str(cal.title()) if cal.title() else ""
+
+            # If CALENDAR_INCLUDE is set, only include matching calendars
+            if include_calendars:
+                include_list = [c.strip() for c in include_calendars.split(',')]
+                if any(inc.lower() in calendar_title.lower() for inc in include_list):
+                    filtered.append(cal)
+                continue
+
+            # If CALENDAR_EXCLUDE is set, exclude matching calendars
+            if exclude_calendars:
+                exclude_list = [c.strip() for c in exclude_calendars.split(',')]
+                if not any(exc.lower() in calendar_title.lower() for exc in exclude_list):
+                    filtered.append(cal)
+                continue
+
+        if os.environ.get('DEBUG_CALENDAR') == 'true':
+            print(f"[DEBUG] Calendars before filtering: {len(calendars)}")
+            print(f"[DEBUG] Calendars after filtering: {len(filtered)}")
+            for cal in filtered:
+                print(f"[DEBUG]   - {cal.title()}")
+
+        return filtered
+
+    def _deduplicate_meetings(self, meetings):
+        """
+        Remove duplicate meetings that have the same title and start time.
+        This handles cases where the same meeting appears in multiple calendars.
+        When duplicates are found, keeps the first occurrence.
+        """
+        seen = {}
+        unique_meetings = []
+
+        for meeting in meetings:
+            # Create a key from title and start time (normalized to lowercase for matching)
+            key = (meeting['name'].lower(), meeting['start'])
+
+            if key not in seen:
+                seen[key] = True
+                unique_meetings.append(meeting)
+            elif os.environ.get('DEBUG_CALENDAR') == 'true':
+                print(f"[DEBUG] Skipping duplicate meeting: {meeting['name']} at {meeting['start']}")
+
+        if os.environ.get('DEBUG_CALENDAR') == 'true' and len(meetings) != len(unique_meetings):
+            print(f"[DEBUG] Removed {len(meetings) - len(unique_meetings)} duplicate meeting(s)")
+
+        return unique_meetings
     
     def get_meetings_for_date(self, target_date=None):
         """
@@ -73,26 +137,29 @@ class CalendarService:
         """
         if not EVENTKIT_AVAILABLE:
             return []
-        
+
         if not self.event_store:
             return []
-        
+
         try:
             # Use target date or today
             now = datetime.now()
             if target_date is None:
                 target_date = now
-            
+
             # Get start and end of the target date
             day_start = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
             day_end = target_date.replace(hour=23, minute=59, second=59, microsecond=999999)
-            
+
             # Convert to NSDate for EventKit
             start_date = NSDate.dateWithTimeIntervalSince1970_(day_start.timestamp())
             end_date = NSDate.dateWithTimeIntervalSince1970_(day_end.timestamp())
-            
+
             # Get all calendars
-            calendars = self.event_store.calendarsForEntityType_(EKEntityTypeEvent)
+            all_calendars = self.event_store.calendarsForEntityType_(EKEntityTypeEvent)
+
+            # Filter calendars based on configuration
+            calendars = self._filter_calendars(all_calendars)
             
             # Create predicate for today's events
             predicate = self.event_store.predicateForEventsWithStartDate_endDate_calendars_(
@@ -221,7 +288,11 @@ class CalendarService:
             
             # Sort by start time
             meetings.sort(key=lambda x: x['start'])
-            
+
+            # Deduplicate meetings with the same title and start time
+            # This handles cases where the same meeting appears in multiple calendars
+            meetings = self._deduplicate_meetings(meetings)
+
             return meetings
             
         except Exception as e:
