@@ -25,7 +25,7 @@ jobs:
 
     - name: Run unit tests
       run: |
-        pytest -m unit -v --cov=scripts --cov=web --cov-report=term-missing
+        pytest -m "not integration" -v --cov=scripts --cov=web --cov-report=term-missing
 
     - name: Run integration tests
       run: |
