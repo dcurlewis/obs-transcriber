@@ -98,13 +98,12 @@ The codebase consists of:
 
 ## Working with Git and Terminal Commands
 
-**IMPORTANT**: When running git commands (status, add, commit, push, pull, diff, etc.) in this workspace:
-- **ALWAYS** use `required_permissions: ["all"]`
-- The sandbox does not work properly with git operations - they will fail or give incomplete output
-- Never waste time trying git commands in the sandbox first
-- Go straight to `required_permissions: ["all"]` for any git operation
-
-This applies to any command that needs to interact with git state or push to remote repositories.
+**CRITICAL — READ BEFORE EVERY SHELL CALL**: When running **any** git command (status, add, commit, push, pull, diff, log, stash, branch, checkout, etc.) in this workspace:
+- You **MUST** set `required_permissions: ["all"]` on the Shell tool call. No exceptions.
+- The default sandbox **will break** git operations — they silently fail, hang, or produce incomplete/incorrect output.
+- **NEVER** attempt a git command without `required_permissions: ["all"]`. Do not "try first" in the sandbox. Do not omit permissions hoping it will work. It will not.
+- This also applies to any command that reads or writes `.git/`, pushes to remotes, or interacts with git state in any way.
+- If you forget this rule and a git command fails, the fix is always: re-run with `required_permissions: ["all"]`.
 
 ## Troubleshooting
 
