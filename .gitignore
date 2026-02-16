@@ -18,4 +18,15 @@ recordings/
 # State files
 .pending_meeting
 processing_queue.csv
-*.bak .planning/
+*.bak
+
+# Planning & tooling
+.planning/
+.claude/
+
+# Logs
+logs/
+
+# Coverage
+.coverage
+htmlcov/
