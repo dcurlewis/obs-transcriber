@@ -7,9 +7,14 @@ A set of scripts to automate the recording, transcription, and processing of mul
 - **CLI Control**: Easily start, stop, and process recordings from the command line.
 - **Speaker Separation**: Automatically separates your audio from other participants' audio.
 - **Speaker Diarization**: Identifies and labels different speakers in the "Others" track.
-- **Fast & Accurate Transcription**: Utilizes MLX Whisper (Apple Silicon optimized) for high-quality, fast speech-to-text with audio normalization.
+- **Fast & Accurate Transcription**: Utilizes MLX Whisper (Apple Silicon optimized via Metal) for high-quality, fast speech-to-text. Multiple model options (tiny, base, small, medium, large-v3, turbo, distil-large-v3) to balance speed and accuracy.
+- **Audio Normalization**: Dynamic volume normalization and speech-frequency filtering (80Hz–8kHz) for consistent, clean input to the transcription engine.
+- **Audio Validation**: Validates audio files before transcription to catch corrupt or empty files early.
 - **Hallucination Filtering**: Removes common transcription artifacts and hallucinations.
 - **Interleaved Transcripts**: Merges separate transcripts into a single, chronologically-ordered file with clear speaker labels.
+- **Dependency Checking**: Automatically verifies required tools (FFmpeg, OBS, Python packages) are installed before running.
+- **Centralized Configuration**: Validated `.env`-based config with clear error messages when settings are missing or invalid.
+- **Log Sanitization**: Sensitive data (passwords, paths) is filtered from log output.
 - **Organized Files**: Manages recordings and transcripts in a clean, timestamped folder structure for easy access.
 
 ## Prerequisites
@@ -71,27 +76,18 @@ Before you begin, ensure you have the following installed:
    - Note down your "Recording Path", as the scripts will need to find the recordings there.
 
 4. **Create Configuration File**:
-   - Create a file named `.env` in the project root.
-   - Add the following content, replacing the placeholder values with your own:
+   - Copy the example configuration and customize it for your setup:
 
-    ```ini
-    [OBS]
-    HOST=localhost
-    PORT=4455
-    PASSWORD=your_obs_websocket_password
-
-    [WHISPER]
-    # Model options: tiny, base, small, medium, large-v3, turbo, distil-large-v3
-    # 'turbo' (large-v3-turbo) recommended for best speed/accuracy balance
-    MODEL=turbo
-    LANGUAGE=en
-
-    [PATHS]
-    # This should be the same as the "Recording Path" in your OBS settings
-    RECORDING_PATH=/Users/your_user/Movies 
-    # Directory where transcriptions will be saved (default: "recordings")
-    TRANSCRIPTION_OUTPUT_DIR=recordings
+    ```bash
+    cp .env.example .env
     ```
+
+   - Open `.env` and fill in at minimum:
+     - `OBS_PASSWORD` — your OBS WebSocket password
+     - `RECORDING_PATH` — the same path as your OBS Recording Path setting
+     - `TRANSCRIPTION_OUTPUT_DIR` — where final transcripts are saved
+
+   - See `.env.example` for all available options including calendar filtering, model selection, and more.
 
 ## Usage
 
@@ -173,52 +169,44 @@ The `run.sh` script also provides CLI commands:
 
 ```text
 .
-├── .env                  # Configuration for OBS, Whisper, and paths
-├── processing_queue.csv  # A log of all recordings and their status
-├── recordings/           # Default output directory for transcripts
+├── .env.example              # Documented configuration template
+├── .env                      # Your local configuration (copy from .env.example)
+├── .github/workflows/
+│   └── test.yml              # CI workflow (GitHub Actions)
+├── processing_queue.csv      # A log of all recordings and their status
+├── pytest.ini                # Test configuration
+├── recordings/               # Default output directory for transcripts
 │   ├── 20231027-My-Meeting_transcript.txt
 │   └── 20231028-Another-Meeting_transcript.txt
-├── scripts/              # All executable scripts
-│   ├── obs_controller.py        # Controls OBS recording via WebSocket
-│   ├── transcribe.py            # MLX Whisper transcription (Apple Silicon)
-│   ├── interleave.py            # Merges transcripts with timestamps
-│   ├── filter_hallucinations.py # Removes transcription artifacts
-│   └── speaker_diarization.py   # Identifies different speakers
-├── web/                  # Web UI (optional)
-│   ├── app.py                   # Flask server
-│   ├── calendar_service.py      # Google Calendar integration (iCal)
-│   ├── recorder.py              # Recording controller
-│   └── templates/static/        # Web interface files
-└── run.sh                # Main entrypoint (CLI and Web UI)
+├── scripts/                  # All executable scripts
+│   ├── audio_validator.py    # Validates audio files before transcription
+│   ├── config.py             # Centralized configuration with validation
+│   ├── dependencies.py       # Dependency checking (FFmpeg, OBS, etc.)
+│   ├── filter_hallucinations.py  # Removes transcription artifacts
+│   ├── interleave.py         # Merges transcripts with timestamps
+│   ├── log_sanitizer.py      # Sanitizes sensitive data in logs
+│   ├── obs_controller.py     # Controls OBS recording via WebSocket
+│   ├── queue_cli.py          # CLI wrapper for queue management
+│   ├── queue_manager.py      # Queue with file locking and atomic writes
+│   ├── root_detection.py     # Centralized project root detection
+│   ├── speaker_diarization.py    # Identifies different speakers
+│   └── transcribe.py         # MLX Whisper transcription (Apple Silicon)
+├── tests/                    # Automated test suite
+│   ├── conftest.py           # Shared fixtures
+│   ├── test_config.py        # Configuration validation tests
+│   ├── test_pipeline_integration.py  # End-to-end workflow tests
+│   ├── test_queue_manager.py # CSV parsing, locking, atomic writes
+│   └── test_root_detection.py    # Path resolution tests
+├── web/                      # Web UI
+│   ├── app.py                # Flask server
+│   ├── calendar_service.py   # macOS Calendar integration
+│   ├── recorder.py           # Recording controller
+│   ├── static/               # CSS, JS, favicon
+│   └── templates/            # HTML templates
+└── run.sh                    # Main entrypoint (CLI and Web UI)
 ```
 
 Note: During processing, temporary files (MKV, WAV, SRT) are created in a subdirectory but cleaned up after successful transcription. Only the final transcript file is saved to your configured output directory.
-
-## Recent Improvements
-
-The following enhancements have been made to improve the quality and usefulness of transcriptions:
-
-### Audio Processing
-
-- **Dynamic Audio Normalization**: The system now applies dynamic audio normalization for consistent volume levels, significantly improving transcription accuracy for quiet or distant speakers.
-- **Optimized Speech Filters**: Audio is filtered to focus on speech frequencies (80Hz-8kHz) for cleaner transcriptions.
-
-### Speaker Identification
-
-- **Speaker Diarization**: The system now identifies different speakers in the "Others" audio track and labels them as "Speaker 1", "Speaker 2", etc., making it much easier to follow conversations in the transcript.
-- **Label Preservation**: Speaker labels are preserved throughout the processing pipeline and reflected in the final transcript.
-
-### Error Handling
-
-- **Improved Troubleshooting**: Better error messages and recovery options for failed transcriptions.
-- **Robust File Processing**: Added safety checks to prevent data loss when processing audio files.
-- **Hallucination Filtering**: Automatic removal of common transcription artifacts and "hallucinations" (like repeated "Thank you" phrases during silence).
-
-### Apple Silicon Optimization
-
-- **MLX Whisper**: Uses MLX Whisper, which is specifically optimized for Apple Silicon Macs using the Metal framework.
-- **Automatic GPU Utilization**: MLX automatically leverages Apple's Neural Engine and GPU for significantly faster transcription.
-- **Multiple Model Options**: Choose from various models (tiny, base, small, medium, large-v3, turbo, distil-large-v3) based on your speed/accuracy needs.
 
 ## Testing
 
@@ -236,9 +224,9 @@ pip install -r requirements.txt  # Includes pytest and pytest-cov
 pytest
 ```
 
-**Run only fast unit tests:**
+**Run only fast unit tests (skip integration tests):**
 ```bash
-pytest -m unit
+pytest -m "not integration"
 ```
 
 **Run with coverage report:**
@@ -262,7 +250,7 @@ pytest tests/test_queue_manager.py -v
 ### Continuous Integration
 
 Tests run automatically on every push via GitHub Actions. The CI workflow:
-1. Runs fast unit tests (marked with `@pytest.mark.unit`)
+1. Runs unit tests (all tests not marked `integration`)
 2. Runs integration tests (marked with `@pytest.mark.integration`)
 3. Generates coverage reports
 4. Uploads coverage to Codecov (if configured)
