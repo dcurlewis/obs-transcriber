@@ -39,7 +39,7 @@ class MeetingTranscriber {
         // Update current time display every second
         this.timeInterval = setInterval(() => this.updateCurrentTimeDisplay(), 1000);
     }
-    
+
     isViewingToday() {
         return this.currentViewDate.toDateString() === this.todayDate.toDateString();
     }
@@ -149,6 +149,7 @@ class MeetingTranscriber {
             const meetingsResponse = await fetch(`/api/meetings?date=${dateStr}`);
             const meetingsData = await meetingsResponse.json();
             this.meetings = meetingsData.meetings || [];
+
             this.updateMeetingsDisplay();
             this.updateDateDisplay();
             this.updateCurrentTimeDisplay();
@@ -184,30 +185,93 @@ class MeetingTranscriber {
     
     updateMeetingsDisplay() {
         const meetingsList = document.getElementById('meetings-list');
+        const hasCurrentMeeting = Boolean(this.currentMeeting && this.currentMeeting.name);
+        const hasMatchingMeeting = hasCurrentMeeting &&
+            this.meetings.some(meeting => meeting.name === this.currentMeeting.name);
+        const showManualRecordingCard = this.isRecording && hasCurrentMeeting && !hasMatchingMeeting;
         
+        let meetingsHtml = '';
         if (this.meetings.length === 0) {
-            meetingsList.innerHTML = `
-                <div class="empty-state">
-                    <div class="empty-state-icon">📅</div>
-                    <div>No meetings scheduled for today</div>
-                    <div style="font-size: 12px; margin-top: 8px;">
-                        Use Quick Record below to start a manual recording
+            if (!showManualRecordingCard) {
+                meetingsHtml = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📅</div>
+                        <div>No meetings scheduled for today</div>
+                        <div style="font-size: 12px; margin-top: 8px;">
+                            Use Quick Record below to start a manual recording
+                        </div>
                     </div>
-                </div>
-            `;
-            return;
+                `;
+            }
+        } else {
+            meetingsHtml = this.meetings.map(meeting => {
+                const isPast = meeting.is_past;
+                const isCurrent = meeting.is_current;
+                const isRecordingThis = this.isRecording &&
+                    this.currentMeeting &&
+                    this.currentMeeting.name === meeting.name;
+                
+                let buttonHtml;
+                if (isRecordingThis) {
+                    buttonHtml = `
+                        <div class="button-group">
+                            <button class="btn btn-success btn-small" onclick="app.stopRecording()">
+                                <span class="icon">■</span> Stop
+                            </button>
+                            <button class="btn btn-danger btn-small" onclick="app.abortRecording()">
+                                <span class="icon">✕</span> Abort
+                            </button>
+                        </div>
+                    `;
+                } else if (this.isRecording) {
+                    buttonHtml = `
+                        <button class="btn btn-small" disabled>
+                            Recording...
+                        </button>
+                    `;
+                } else if (isPast) {
+                    buttonHtml = `
+                        <button class="btn btn-small" disabled>
+                            Ended
+                        </button>
+                    `;
+                } else {
+                    buttonHtml = `
+                        <button class="btn btn-primary btn-small" onclick="app.startRecording('${this.escapeHtml(meeting.name)}')">
+                            <span class="icon">▶</span> Start
+                        </button>
+                    `;
+                }
+                
+                const cardClass = isCurrent ? 'meeting-card current' : isPast ? 'meeting-card past' : 'meeting-card';
+                
+                let conferenceLink = '';
+                if (meeting.has_conference && meeting.conference_url) {
+                    conferenceLink = ` <a href="${meeting.conference_url}" target="_blank" rel="noopener noreferrer" class="conference-link" title="Join meeting">🔗</a>`;
+                }
+                
+                return `
+                    <div class="${cardClass}">
+                        <div class="meeting-info">
+                            <span class="meeting-time">${meeting.start_time} - ${meeting.end_time}</span>
+                            <span class="meeting-separator">•</span>
+                            <span class="meeting-name">${this.escapeHtml(meeting.name)}${conferenceLink}</span>
+                        </div>
+                        ${buttonHtml}
+                    </div>
+                `;
+            }).join('');
         }
-        
-        meetingsList.innerHTML = this.meetings.map(meeting => {
-            const isPast = meeting.is_past;
-            const isCurrent = meeting.is_current;
-            const isRecordingThis = this.isRecording && 
-                                   this.currentMeeting && 
-                                   this.currentMeeting.name === meeting.name;
-            
-            let buttonHtml;
-            if (isRecordingThis) {
-                buttonHtml = `
+
+        let manualRecordingHtml = '';
+        if (showManualRecordingCard) {
+            manualRecordingHtml = `
+                <div class="meeting-card current">
+                    <div class="meeting-info">
+                        <span class="meeting-time">Now</span>
+                        <span class="meeting-separator">•</span>
+                        <span class="meeting-name">${this.escapeHtml(this.currentMeeting.name)} (Quick Record)</span>
+                    </div>
                     <div class="button-group">
                         <button class="btn btn-success btn-small" onclick="app.stopRecording()">
                             <span class="icon">■</span> Stop
@@ -216,45 +280,11 @@ class MeetingTranscriber {
                             <span class="icon">✕</span> Abort
                         </button>
                     </div>
-                `;
-            } else if (this.isRecording) {
-                buttonHtml = `
-                    <button class="btn btn-small" disabled>
-                        Recording...
-                    </button>
-                `;
-            } else if (isPast) {
-                buttonHtml = `
-                    <button class="btn btn-small" disabled>
-                        Ended
-                    </button>
-                `;
-            } else {
-                buttonHtml = `
-                    <button class="btn btn-primary btn-small" onclick="app.startRecording('${this.escapeHtml(meeting.name)}')">
-                        <span class="icon">▶</span> Start
-                    </button>
-                `;
-            }
-            
-            const cardClass = isCurrent ? 'meeting-card current' : isPast ? 'meeting-card past' : 'meeting-card';
-            
-            let conferenceLink = '';
-            if (meeting.has_conference && meeting.conference_url) {
-                conferenceLink = ` <a href="${meeting.conference_url}" target="_blank" rel="noopener noreferrer" class="conference-link" title="Join meeting">🔗</a>`;
-            }
-            
-            return `
-                <div class="${cardClass}">
-                    <div class="meeting-info">
-                        <span class="meeting-time">${meeting.start_time} - ${meeting.end_time}</span>
-                        <span class="meeting-separator">•</span>
-                        <span class="meeting-name">${this.escapeHtml(meeting.name)}${conferenceLink}</span>
-                    </div>
-                    ${buttonHtml}
                 </div>
             `;
-        }).join('');
+        }
+
+        meetingsList.innerHTML = `${manualRecordingHtml}${meetingsHtml}`;
     }
     
     updateQueueDisplay() {
