@@ -20,6 +20,10 @@ RECORDING_PATH_RAW=${RECORDING_PATH:-.}
 RECORDING_PATH="${RECORDING_PATH_RAW/\~/$HOME}"
 # Option to retain raw MKV files for troubleshooting (default: false)
 KEEP_RAW_RECORDING=${KEEP_RAW_RECORDING:-false}
+# Enable speaker diarization on the 'others' audio track (default: false)
+# Requires HF_TOKEN to be set. See .env.example for setup instructions.
+ENABLE_DIARIZATION=${ENABLE_DIARIZATION:-false}
+HF_TOKEN=${HF_TOKEN:-}
 
 # --- Setup Python Command ---
 # Prioritize using a project-local virtual environment if it exists.
@@ -374,8 +378,39 @@ for entry in entries:
                     else
                         echo "⚠️  Hallucination filtering failed, keeping original SRT files"
                     fi
-                    
+
+                    # me.wav is no longer needed after transcription
                     safe_delete "$TARGET_DIR/${FINAL_BASENAME}_me.wav" "audio file (me)"
+
+                    # --- Speaker Diarization (others track only) ---
+                    # others.wav must stay available until diarization completes
+                    if [ "${ENABLE_DIARIZATION}" = "true" ]; then
+                        if [ -z "${HF_TOKEN}" ]; then
+                            echo "⚠️  ENABLE_DIARIZATION=true but HF_TOKEN is not set. Skipping diarization."
+                            echo "   Set HF_TOKEN in your .env file (see .env.example for setup instructions)."
+                        else
+                            echo "⏳ Running speaker diarization on others track..."
+                            DIARIZE_START=$(date +%s)
+                            LABELED_SRT="$TARGET_DIR/${FINAL_BASENAME}_others_labeled.srt"
+                            if $PYTHON_CMD "$SCRIPTS_DIR/diarize.py" \
+                                "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
+                                "$TARGET_DIR/${FINAL_BASENAME}_others.srt" \
+                                -o "$LABELED_SRT"; then
+                                DIARIZE_END=$(date +%s)
+                                DIARIZE_TIME=$((DIARIZE_END - DIARIZE_START))
+                                if [ -s "$LABELED_SRT" ]; then
+                                    mv "$LABELED_SRT" "$TARGET_DIR/${FINAL_BASENAME}_others.srt"
+                                    echo "✅ Diarization completed in ${DIARIZE_TIME}s"
+                                else
+                                    echo "⚠️  Diarization produced empty output; keeping un-labeled transcript"
+                                    safe_delete "$LABELED_SRT" "empty diarization output"
+                                fi
+                            else
+                                echo "⚠️  Diarization failed; transcript will use 'Others' label instead of individual speakers"
+                            fi
+                        fi
+                    fi
+
                     safe_delete "$TARGET_DIR/${FINAL_BASENAME}_others.wav" "audio file (others)"
                 else
                     echo "Warning: SRT files are empty. Keeping WAV files for safety."

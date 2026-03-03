@@ -11,6 +11,7 @@ Usage:
     check_dependencies()  # Exits with code 1 if dependencies missing
 """
 
+import os
 import shutil
 import sys
 from colorama import Fore, Style, just_fix_windows_console
@@ -37,6 +38,7 @@ def check_dependencies() -> None:
     Validates:
     - External commands: ffmpeg, ffprobe
     - Python modules: obsws_python
+    - When ENABLE_DIARIZATION=true: pyannote.audio, torch
 
     Exits with code 1 if any dependency is missing, displaying
     colored error message with installation instructions.
@@ -60,7 +62,7 @@ def check_dependencies() -> None:
 
     # Check Python modules
     try:
-        import obsws_python
+        import obsws_python  # noqa: F401
     except ImportError:
         missing.append({
             'name': 'obsws-python',
@@ -68,11 +70,37 @@ def check_dependencies() -> None:
             'type': 'python'
         })
 
+    # Check diarization dependencies only when the feature is enabled
+    if os.environ.get('ENABLE_DIARIZATION', '').lower() == 'true':
+        try:
+            import torch  # noqa: F401
+        except ImportError:
+            missing.append({
+                'name': 'torch',
+                'purpose': 'Required for speaker diarization (ENABLE_DIARIZATION=true)',
+                'type': 'python'
+            })
+
+        try:
+            import pyannote.audio  # noqa: F401
+        except ImportError:
+            missing.append({
+                'name': 'pyannote.audio',
+                'purpose': 'Required for speaker diarization (ENABLE_DIARIZATION=true)',
+                'type': 'python',
+                'extra': (
+                    'After installing, accept model licenses and set HF_TOKEN in .env.\n'
+                    '    See .env.example for setup instructions.'
+                )
+            })
+
     # If any dependencies missing, display error and exit
     if missing:
         print(f"\n{Fore.RED}{Style.BRIGHT}Missing Dependencies:{Style.RESET_ALL}")
         for dep in missing:
             print(f"{Fore.RED}  • {dep['name']}: {dep['purpose']}{Style.RESET_ALL}")
+            if dep.get('extra'):
+                print(f"{Fore.YELLOW}    {dep['extra']}{Style.RESET_ALL}")
 
         print(f"\n{Style.BRIGHT}Installation:{Style.RESET_ALL}")
 

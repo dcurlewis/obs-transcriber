@@ -49,10 +49,21 @@ Before you begin, ensure you have the following installed:
     *Note: You will need to activate the virtual environment (`source venv/bin/activate`) in each new terminal session before running the scripts.*
 
 6. **Speaker Diarization Setup (Optional)**:
-   - For speaker diarization, you need a Hugging Face account and access token
-   - Visit <https://huggingface.co/pyannote/speaker-diarization> and accept the terms
-   - Get your access token from <https://huggingface.co/settings/tokens>
-   - Use your token when prompted during the first diarization run
+
+    Speaker diarization identifies individual speakers in the "Others" track (e.g. "Speaker 1", "Speaker 2"). It is disabled by default and requires a one-time HuggingFace setup:
+
+    1. Create a HuggingFace account at <https://huggingface.co>
+    2. Accept the model license: <https://huggingface.co/pyannote/speaker-diarization-3.1>
+    3. Accept the model license: <https://huggingface.co/pyannote/segmentation-3.0>
+    4. Generate a read token: <https://huggingface.co/settings/tokens>
+    5. Add the following to your `.env` file:
+
+    ```ini
+    ENABLE_DIARIZATION=true
+    HF_TOKEN=hf_your_token_here
+    ```
+
+    Models (~95 MB total) are downloaded automatically on first use and cached in `~/.cache/huggingface/`. Subsequent runs use the cache with no download needed.
 
 ## Setup
 
@@ -86,6 +97,10 @@ Before you begin, ensure you have the following installed:
      - `OBS_PASSWORD` — your OBS WebSocket password
      - `RECORDING_PATH` — the same path as your OBS Recording Path setting
      - `TRANSCRIPTION_OUTPUT_DIR` — where final transcripts are saved
+
+   - To enable speaker diarization, also add:
+     - `ENABLE_DIARIZATION=true`
+     - `HF_TOKEN=hf_your_token_here` (see prerequisite step 6 above)
 
    - See `.env.example` for all available options including calendar filtering, model selection, and more.
 
@@ -189,7 +204,7 @@ The `run.sh` script also provides CLI commands:
 │   ├── queue_cli.py          # CLI wrapper for queue management
 │   ├── queue_manager.py      # Queue with file locking and atomic writes
 │   ├── root_detection.py     # Centralized project root detection
-│   ├── speaker_diarization.py    # Identifies different speakers
+│   ├── diarize.py            # Speaker diarization via pyannote.audio (optional)
 │   └── transcribe.py         # MLX Whisper transcription (Apple Silicon)
 ├── tests/                    # Automated test suite
 │   ├── conftest.py           # Shared fixtures
