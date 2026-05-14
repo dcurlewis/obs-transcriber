@@ -251,6 +251,13 @@ class RecordingController:
             
             # Add to queue using QueueManager with atomic operations
             with self.queue_manager.atomic_update() as entries:
+                # Guard against duplicates (e.g. double-click on Stop)
+                if any(e['path'] == latest_recording for e in entries):
+                    self.pending_file.unlink()
+                    return {
+                        'success': False,
+                        'error': f"Recording '{latest_recording}' is already in the queue."
+                    }
                 entries.append({
                     'path': latest_recording,
                     'name': meeting_name,
@@ -473,7 +480,6 @@ class RecordingController:
                     if entry['path'] == recording_path:
                         entry['status'] = 'discarded'
                         found = True
-                        break
 
                 if not found:
                     return {'success': False, 'error': 'Recording not found in queue'}

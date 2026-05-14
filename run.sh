@@ -173,13 +173,15 @@ function process_recordings() {
     
     # Get list of recorded entries using queue_cli.py
     # Use a temporary file for safe iteration (ffmpeg can't consume stdin this way)
+    # Fields are separated by ASCII Unit Separator (\x1f) so that any printable
+    # character (including '|', which appears in attendees and can appear in names)
+    # is safe inside a field.
     TEMP_QUEUE_FILE=$(mktemp)
     $PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" list recorded | $PYTHON_CMD -c "
 import sys, json
 entries = json.load(sys.stdin)
 for entry in entries:
-    # Output in pipe-delimited format for shell parsing
-    print('|'.join([entry.get('path', ''), entry.get('name', ''), entry.get('date', ''), entry.get('status', ''), entry.get('attendees', '')]))
+    print('\x1f'.join([entry.get('path', ''), entry.get('name', ''), entry.get('date', ''), entry.get('status', ''), entry.get('attendees', '')]))
 " > "$TEMP_QUEUE_FILE"
 
     # Track which recordings were successfully processed
@@ -189,7 +191,7 @@ for entry in entries:
     # IMPORTANT: read from a dedicated FD so commands inside the loop
     # (notably ffmpeg) can't accidentally consume stdin and corrupt subsequent reads.
     exec 3< "$TEMP_QUEUE_FILE"
-    while IFS='|' read -r raw_mkv_path meeting_name meeting_date status attendees <&3; do
+    while IFS=$'\x1f' read -r raw_mkv_path meeting_name meeting_date status attendees <&3; do
         if [ "$status" = "recorded" ] && [ -n "$raw_mkv_path" ]; then
             echo "-----------------------------------------------------"
             echo "Processing: '$meeting_name' from $meeting_date"
@@ -509,14 +511,15 @@ function show_status() {
     TOTAL_FILES=0
     TOTAL_SIZE=0
     
-    # Get queue entries as JSON from queue_cli.py, then parse with Python
+    # Get queue entries as JSON from queue_cli.py, then parse with Python.
+    # Fields are separated by ASCII Unit Separator (\x1f) so '|' inside any field
+    # (e.g., attendees, or a name like "Tech Leads | Show & Tell") doesn't break parsing.
     $PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" list | $PYTHON_CMD -c "
 import sys, json
 entries = json.load(sys.stdin)
 for entry in entries:
-    # Output in pipe-delimited format for shell parsing
-    print('|'.join([entry.get('path', ''), entry.get('name', ''), entry.get('date', ''), entry.get('status', ''), entry.get('attendees', '')]))
-" | while IFS='|' read -r raw_mkv_path meeting_name meeting_date status attendees; do
+    print('\x1f'.join([entry.get('path', ''), entry.get('name', ''), entry.get('date', ''), entry.get('status', ''), entry.get('attendees', '')]))
+" | while IFS=$'\x1f' read -r raw_mkv_path meeting_name meeting_date status attendees; do
         # Skip empty entries
         if [ -z "$status" ] || [ -z "$meeting_date" ] || [ -z "$meeting_name" ] || [ -z "$raw_mkv_path" ]; then
             continue
@@ -671,27 +674,35 @@ function discard_recording() {
     fi
 
     echo "Select a recording to discard:"
-    # Create array of options using queue_cli.py (portable for zsh and bash)
-    options=()
-    while IFS= read -r line; do
-        options+=("$line")
+    # Build two parallel arrays:
+    #   - display_options: human-readable labels shown in the select menu
+    #   - data_lines: same order, each line has the full record fields separated
+    #     by ASCII Unit Separator (\x1f) so '|' inside any field is safe.
+    display_options=()
+    data_lines=()
+    while IFS=$'\x1f' read -r path name date status; do
+        display_options+=("$date — $name")
+        data_lines+=("${path}"$'\x1f'"${name}"$'\x1f'"${date}"$'\x1f'"${status}")
     done < <($PYTHON_CMD "$SCRIPTS_DIR/queue_cli.py" list recorded | $PYTHON_CMD -c "
 import sys, json
 entries = json.load(sys.stdin)
 for entry in entries:
-    # Output in format: path|name|date|status for shell parsing
-    print('|'.join([entry.get('path', ''), entry.get('name', ''), entry.get('date', ''), entry.get('status', '')]))
+    print('\x1f'.join([entry.get('path', ''), entry.get('name', ''), entry.get('date', ''), entry.get('status', '')]))
 ")
 
-    # Use a select loop to create a menu.
-    select opt in "${options[@]}" "Quit"; do
+    # Use a select loop to create a menu. REPLY holds the chosen index (1-based).
+    select opt in "${display_options[@]}" "Quit"; do
         if [ "$opt" == "Quit" ]; then
             echo "Discard cancelled."
             break
         fi
 
-        # Extract details from the selected line (pipe-delimited)
-        IFS='|' read -r raw_mkv_path meeting_name meeting_date status <<< "$opt"
+        # Look up the full data line by the menu index, then split on \x1f.
+        if ! [[ "$REPLY" =~ ^[0-9]+$ ]] || [ "$REPLY" -lt 1 ] || [ "$REPLY" -gt "${#data_lines[@]}" ]; then
+            echo "Invalid selection."
+            continue
+        fi
+        IFS=$'\x1f' read -r raw_mkv_path meeting_name meeting_date status <<< "${data_lines[$((REPLY - 1))]}"
 
         read -p "Are you sure you want to discard '$meeting_name' and delete its recording file? [y/N] " -n 1 -r
         echo
