@@ -62,7 +62,7 @@ def run_meeting(
     asr_model: str = "turbo",
     language: str = "en",
     do_diarize: bool = True,
-    diar_model_label: str = "pyannote/speaker-diarization-3.1",
+    diar_model_label: str | None = None,
     hf_token: str | None = None,
     device: str | None = None,
     collar: float = 0.0,
@@ -78,7 +78,8 @@ def run_meeting(
         "meeting": meeting,
         "asr_backend": asr_backend,
         "asr_model": asr_model,
-        "diar_model": diar_model_label if do_diarize else None,
+        # Resolved to the model that actually ran in the diarization branch below.
+        "diar_model": None,
         "wer": None,
         "der": None,        # SRT-derived labels (what the pipeline actually emits)
         "der_raw": None,    # pyannote's native output (comparable to published DER)
@@ -108,6 +109,10 @@ def run_meeting(
                 row["error"] = "diarization requested but HF_TOKEN not set; DER skipped"
             else:
                 import diarize  # scripts/diarize.py
+
+                # Label the report with the model that actually ran (honors the
+                # DIARIZATION_MODEL env override) unless one was explicitly given.
+                row["diar_model"] = diar_model_label or diarize.DIARIZATION_MODEL
 
                 # Run the pyannote pipeline once; score both its native output
                 # and the SRT-derived labels the pipeline ultimately emits.
@@ -207,8 +212,10 @@ def main():
     parser.add_argument("-l", "--language", default=os.getenv("WHISPER_LANGUAGE", "en"))
     parser.add_argument("--no-diarize", action="store_true",
                         help="Skip diarization (WER only)")
-    parser.add_argument("--diar-model-label", default="pyannote/speaker-diarization-3.1",
-                        help="Label recorded for the diarization model in the report")
+    parser.add_argument("--diar-model-label", default=None,
+                        help="Label recorded for the diarization model in the report "
+                             "(default: the model that actually ran, i.e. "
+                             "diarize.DIARIZATION_MODEL)")
     parser.add_argument("--hf-token", default=os.getenv("HF_TOKEN"),
                         help="HuggingFace token for pyannote (default: $HF_TOKEN)")
     parser.add_argument("--device", default=None, choices=["mps", "cpu"],
