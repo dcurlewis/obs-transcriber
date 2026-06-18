@@ -3,7 +3,8 @@ obsws-python
 srt
 python-dotenv
 colorama>=0.4.6
-pyannote.audio>=2.1.0
+pyannote.audio>=4.0  # speaker-diarization-community-1 requires 4.x
+speechbrain>=1.1.0   # 1.1.0 supports torchaudio>=2.9 (older versions call the removed list_audio_backends)
 torch>=1.9.0
 flask>=3.0
 icalendar>=5.0.0
