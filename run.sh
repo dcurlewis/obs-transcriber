@@ -12,6 +12,11 @@ if [ -f .env ]; then
 fi
 
 # Set defaults if not provided in .env
+# ASR backend: 'parakeet' (NVIDIA Parakeet via MLX, default) or 'whisper' (MLX Whisper).
+# Parakeet is more accurate and faster on Apple Silicon (see issue #4).
+# Exported so scripts/transcribe.py picks it up automatically.
+ASR_BACKEND=${ASR_BACKEND:-parakeet}
+export ASR_BACKEND
 # Default to 'turbo' model (large-v3-turbo) for best speed/accuracy balance on Apple Silicon
 WHISPER_MODEL=${WHISPER_MODEL:-turbo}
 WHISPER_LANGUAGE=${WHISPER_LANGUAGE:-en}
@@ -317,16 +322,21 @@ for entry in entries:
                 done
                 
                 if [ ${#FAILED_PROCESSES[@]} -gt 0 ]; then
-                    echo "⚠️  ${#FAILED_PROCESSES[@]} transcription(s) failed, attempting recovery with smaller model..."
-                    
-                    # Retry failed transcriptions with a smaller/faster model
-                    echo "🔄 Retrying with 'base' model..."
+                    echo "⚠️  ${#FAILED_PROCESSES[@]} transcription(s) failed, attempting recovery..."
+
+                    # Recovery always falls back to MLX Whisper 'base' — a small,
+                    # reliable model and a genuinely different engine from the
+                    # primary backend (important when ASR_BACKEND=parakeet, so the
+                    # retry isn't just the same model again). --backend whisper is
+                    # explicit so it doesn't inherit ASR_BACKEND.
+                    echo "🔄 Retrying with Whisper 'base' model..."
                     RETRY_START=$(date +%s)
-                    
+
                     if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ]; then
                         $PYTHON_CMD "$SCRIPTS_DIR/transcribe.py" \
                             "$TARGET_DIR/${FINAL_BASENAME}_me.wav" \
                             -o "$TARGET_DIR" \
+                            --backend whisper \
                             -m "base" \
                             -l "$WHISPER_LANGUAGE"
                     fi
@@ -334,6 +344,7 @@ for entry in entries:
                         $PYTHON_CMD "$SCRIPTS_DIR/transcribe.py" \
                             "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
                             -o "$TARGET_DIR" \
+                            --backend whisper \
                             -m "base" \
                             -l "$WHISPER_LANGUAGE"
                     fi
@@ -348,9 +359,9 @@ for entry in entries:
                         echo "❌ Transcription failed even after recovery attempts"
                         echo "💡 Troubleshooting suggestions:"
                         echo "   - Check audio file integrity: ffmpeg -i \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\" -f null -"
-                        echo "   - Try manual transcription: python scripts/transcribe.py \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\" -o \"$TARGET_DIR\" -m base"
+                        echo "   - Try manual transcription: python scripts/transcribe.py \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\" -o \"$TARGET_DIR\" --backend whisper -m base"
                         echo "   - Check available disk space and memory"
-                        echo "   - Ensure mlx-whisper is installed: pip install mlx-whisper"
+                        echo "   - Ensure dependencies are installed: pip install -r requirements.txt"
                     fi
                 else
                     TRANSCRIPTION_END=$(date +%s)
@@ -759,7 +770,8 @@ if [ -z "$1" ]; then
     echo "  web           - Start the web UI (http://localhost:5000)"
     echo ""
     echo "Environment Variables:"
-    echo "  WHISPER_MODEL=turbo        Whisper model to use (default: turbo)"
+    echo "  ASR_BACKEND=parakeet       ASR backend: parakeet (default) or whisper"
+    echo "  WHISPER_MODEL=turbo        Whisper model (default: turbo; only when ASR_BACKEND=whisper)"
     echo "                             Options: tiny, base, small, medium, large-v3, turbo, distil-large-v3"
     echo "  WHISPER_LANGUAGE=en        Language code for transcription (default: en)"
     echo "  KEEP_RAW_RECORDING=true    Retain raw MKV files for troubleshooting (default: false)"

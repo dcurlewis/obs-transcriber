@@ -36,29 +36,28 @@ from evaluation import datasets_ami, scoring
 
 def _transcribe(audio_path: Path, out_dir: Path, backend: str, model: str,
                 language: str, verbose: bool) -> Path:
-    """Produce an SRT for ``audio_path`` using the chosen ASR backend."""
-    if backend == "whisper":
-        import transcribe  # scripts/transcribe.py
-        return transcribe.transcribe(
-            audio_path=str(audio_path),
-            output_dir=str(out_dir),
-            model=model,
-            language=language,
-            verbose=verbose,
-        )
-    if backend == "parakeet":
-        # Placeholder for issue #4 (NVIDIA Parakeet-TDT via MLX). Once a
-        # Parakeet path exists in the pipeline, wire it in here.
-        raise NotImplementedError(
-            "Parakeet backend not implemented yet — see issue #4. Use --asr-backend whisper."
-        )
-    raise ValueError(f"Unknown ASR backend: {backend!r}")
+    """Produce an SRT for ``audio_path`` using the chosen ASR backend.
+
+    Both backends are handled by scripts/transcribe.py, so the harness exercises
+    the exact code path the production pipeline uses.
+    """
+    if backend not in ("whisper", "parakeet"):
+        raise ValueError(f"Unknown ASR backend: {backend!r}")
+    import transcribe  # scripts/transcribe.py
+    return transcribe.transcribe(
+        audio_path=str(audio_path),
+        output_dir=str(out_dir),
+        model=model,
+        language=language,
+        verbose=verbose,
+        backend=backend,
+    )
 
 
 def run_meeting(
     meeting: str,
     *,
-    asr_backend: str = "whisper",
+    asr_backend: str = "parakeet",
     asr_model: str = "turbo",
     language: str = "en",
     do_diarize: bool = True,
@@ -205,8 +204,8 @@ def main():
     )
     parser.add_argument("meetings", nargs="*", default=None,
                         help=f"AMI meeting IDs (default: {datasets_ami.DEFAULT_SUBSET})")
-    parser.add_argument("--asr-backend", default="whisper", choices=["whisper", "parakeet"],
-                        help="ASR backend (default: whisper)")
+    parser.add_argument("--asr-backend", default="parakeet", choices=["whisper", "parakeet"],
+                        help="ASR backend (default: parakeet)")
     parser.add_argument("--asr-model", default=os.getenv("WHISPER_MODEL", "turbo"),
                         help="ASR model (default: $WHISPER_MODEL or 'turbo')")
     parser.add_argument("-l", "--language", default=os.getenv("WHISPER_LANGUAGE", "en"))

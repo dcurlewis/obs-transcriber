@@ -6,6 +6,7 @@ and outputs SRT format subtitles.
 """
 
 import argparse
+import os
 import sys
 from pathlib import Path
 from datetime import timedelta
@@ -40,6 +41,11 @@ MODEL_MAPPING = {
     "distil-small.en": "mlx-community/distil-whisper-small.en",
 }
 
+# Default NVIDIA Parakeet model for the 'parakeet' backend (Apple Silicon via MLX).
+# See issue #4: faster and more accurate than whisper-large-v3-turbo on the
+# Open ASR Leaderboard; multilingual (25 European languages) in v3.
+PARAKEET_MODEL = "mlx-community/parakeet-tdt-0.6b-v3"
+
 
 def format_timestamp_srt(seconds: float) -> str:
     """Convert seconds to SRT timestamp format (HH:MM:SS,mmm)"""
@@ -66,22 +72,71 @@ def write_srt(segments: list, output_path: Path) -> None:
             f.write("\n")
 
 
+def _whisper_segments(audio_path: Path, model: str, language: str, verbose: bool) -> list:
+    """Transcribe with MLX Whisper, returning a list of {start, end, text} segments."""
+    model_path = MODEL_MAPPING.get(model, model)
+    if verbose:
+        print(f"🎯 Backend: whisper | Model: {model} ({model_path})")
+        print(f"🌍 Language: {language}")
+
+    result = mlx_whisper.transcribe(
+        str(audio_path),
+        path_or_hf_repo=model_path,
+        language=language,
+        # Optimize for transcription quality
+        condition_on_previous_text=False,  # Reduces hallucinations
+        no_speech_threshold=0.6,  # Filter out non-speech segments
+        compression_ratio_threshold=2.4,  # Filter garbled audio
+        word_timestamps=False,  # We only need segment-level timestamps for SRT
+        verbose=verbose,
+    )
+    return result.get('segments', [])
+
+
+def _parakeet_segments(audio_path: Path, model: str, verbose: bool) -> list:
+    """Transcribe with NVIDIA Parakeet (MLX), returning {start, end, text} segments.
+
+    Parakeet auto-detects language (no language arg). Long audio is processed in
+    overlapping chunks. Sentence-level alignments map directly to SRT segments.
+    """
+    try:
+        from parakeet_mlx import from_pretrained
+    except ImportError:
+        raise ImportError(
+            "parakeet-mlx is not installed. Install it with: pip install parakeet-mlx"
+        )
+
+    if verbose:
+        print(f"🎯 Backend: parakeet | Model: {model}")
+
+    pk = from_pretrained(model)
+    result = pk.transcribe(str(audio_path), chunk_duration=120.0, overlap_duration=15.0)
+    return [
+        {"start": s.start, "end": s.end, "text": s.text}
+        for s in result.sentences
+    ]
+
+
 def transcribe(
     audio_path: str,
     output_dir: str,
     model: str = "turbo",
     language: str = "en",
-    verbose: bool = True
+    verbose: bool = True,
+    backend: str = "parakeet",
 ) -> Path:
     """
-    Transcribe an audio file using MLX Whisper.
+    Transcribe an audio file to SRT using the chosen ASR backend.
 
     Args:
         audio_path: Path to the input audio file
         output_dir: Directory to save the output SRT file
-        model: Whisper model to use (e.g., 'turbo', 'large-v3', 'base')
-        language: Language code (e.g., 'en', 'es', 'fr')
+        model: Model to use. For backend='whisper', a Whisper name (e.g. 'turbo',
+            'large-v3'). For backend='parakeet', a Parakeet repo id; if a Whisper
+            name is passed it falls back to PARAKEET_MODEL.
+        language: Language code (whisper only; parakeet auto-detects)
         verbose: Whether to print progress information
+        backend: 'whisper' (MLX Whisper) or 'parakeet' (NVIDIA Parakeet via MLX)
 
     Returns:
         Path to the output SRT file
@@ -98,37 +153,25 @@ def transcribe(
         raise
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    
-    # Determine the model path
-    model_path = MODEL_MAPPING.get(model, model)
-    
+
     if verbose:
-        print(f"🎯 Model: {model} ({model_path})")
-        print(f"🌍 Language: {language}")
         print(f"📂 Input: {audio_path}")
-    
-    # Transcribe using MLX Whisper
-    if verbose:
         print("⏳ Transcribing...")
-    
-    result = mlx_whisper.transcribe(
-        str(audio_path),
-        path_or_hf_repo=model_path,
-        language=language,
-        # Optimize for transcription quality
-        condition_on_previous_text=False,  # Reduces hallucinations
-        no_speech_threshold=0.6,  # Filter out non-speech segments
-        compression_ratio_threshold=2.4,  # Filter garbled audio
-        word_timestamps=False,  # We only need segment-level timestamps for SRT
-        verbose=verbose,
-    )
-    
+
+    if backend == "parakeet":
+        # A Whisper-style model name (or the default 'turbo') means "use the
+        # default Parakeet model" rather than a literal repo id.
+        pk_model = model if "parakeet" in model else PARAKEET_MODEL
+        segments = _parakeet_segments(audio_path, pk_model, verbose)
+    elif backend == "whisper":
+        segments = _whisper_segments(audio_path, model, language, verbose)
+    else:
+        raise ValueError(f"Unknown ASR backend: {backend!r} (expected 'whisper' or 'parakeet')")
+
     # Write SRT output
     output_filename = audio_path.stem + ".srt"
     output_path = output_dir / output_filename
-    
-    segments = result.get('segments', [])
-    
+
     if not segments:
         if verbose:
             print("⚠️  No speech segments detected in audio")
@@ -138,10 +181,10 @@ def transcribe(
         write_srt(segments, output_path)
         if verbose:
             print(f"✅ Transcription complete: {len(segments)} segments")
-    
+
     if verbose:
         print(f"💾 Output: {output_path}")
-    
+
     return output_path
 
 
@@ -176,30 +219,38 @@ Examples:
         help="Directory to save the output SRT file"
     )
     parser.add_argument(
+        "--backend",
+        default=os.environ.get("ASR_BACKEND", "parakeet"),
+        choices=["whisper", "parakeet"],
+        help="ASR backend (default: $ASR_BACKEND or 'parakeet')"
+    )
+    parser.add_argument(
         "-m", "--model",
         default="turbo",
-        help="Whisper model to use (default: turbo)"
+        help="Model to use (whisper name like 'turbo'; ignored for parakeet "
+             "unless a parakeet repo id is given)"
     )
     parser.add_argument(
         "-l", "--language",
         default="en",
-        help="Language code (default: en)"
+        help="Language code (default: en; whisper only — parakeet auto-detects)"
     )
     parser.add_argument(
         "-q", "--quiet",
         action="store_true",
         help="Suppress progress output"
     )
-    
+
     args = parser.parse_args()
-    
+
     try:
         output_path = transcribe(
             audio_path=args.audio_file,
             output_dir=args.output_dir,
             model=args.model,
             language=args.language,
-            verbose=not args.quiet
+            verbose=not args.quiet,
+            backend=args.backend,
         )
         print(output_path)  # Print path for shell script to capture
     except AudioValidationError:
