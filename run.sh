@@ -322,16 +322,21 @@ for entry in entries:
                 done
                 
                 if [ ${#FAILED_PROCESSES[@]} -gt 0 ]; then
-                    echo "⚠️  ${#FAILED_PROCESSES[@]} transcription(s) failed, attempting recovery with smaller model..."
-                    
-                    # Retry failed transcriptions with a smaller/faster model
-                    echo "🔄 Retrying with 'base' model..."
+                    echo "⚠️  ${#FAILED_PROCESSES[@]} transcription(s) failed, attempting recovery..."
+
+                    # Recovery always falls back to MLX Whisper 'base' — a small,
+                    # reliable model and a genuinely different engine from the
+                    # primary backend (important when ASR_BACKEND=parakeet, so the
+                    # retry isn't just the same model again). --backend whisper is
+                    # explicit so it doesn't inherit ASR_BACKEND.
+                    echo "🔄 Retrying with Whisper 'base' model..."
                     RETRY_START=$(date +%s)
-                    
+
                     if [ ! -f "$TARGET_DIR/${FINAL_BASENAME}_me.srt" ] && [ -f "$TARGET_DIR/${FINAL_BASENAME}_me.wav" ]; then
                         $PYTHON_CMD "$SCRIPTS_DIR/transcribe.py" \
                             "$TARGET_DIR/${FINAL_BASENAME}_me.wav" \
                             -o "$TARGET_DIR" \
+                            --backend whisper \
                             -m "base" \
                             -l "$WHISPER_LANGUAGE"
                     fi
@@ -339,6 +344,7 @@ for entry in entries:
                         $PYTHON_CMD "$SCRIPTS_DIR/transcribe.py" \
                             "$TARGET_DIR/${FINAL_BASENAME}_others.wav" \
                             -o "$TARGET_DIR" \
+                            --backend whisper \
                             -m "base" \
                             -l "$WHISPER_LANGUAGE"
                     fi
@@ -353,9 +359,9 @@ for entry in entries:
                         echo "❌ Transcription failed even after recovery attempts"
                         echo "💡 Troubleshooting suggestions:"
                         echo "   - Check audio file integrity: ffmpeg -i \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\" -f null -"
-                        echo "   - Try manual transcription: python scripts/transcribe.py \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\" -o \"$TARGET_DIR\" -m base"
+                        echo "   - Try manual transcription: python scripts/transcribe.py \"$TARGET_DIR/${FINAL_BASENAME}_me.wav\" -o \"$TARGET_DIR\" --backend whisper -m base"
                         echo "   - Check available disk space and memory"
-                        echo "   - Ensure mlx-whisper is installed: pip install mlx-whisper"
+                        echo "   - Ensure dependencies are installed: pip install -r requirements.txt"
                     fi
                 else
                     TRANSCRIPTION_END=$(date +%s)
