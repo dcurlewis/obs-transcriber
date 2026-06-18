@@ -12,4 +12,8 @@ tzlocal
 requests
 pyobjc-framework-EventKit>=10.0
 pytest>=9.0
-pytest-cov>=7.0 
+pytest-cov>=7.0
+# Evaluation harness (see evaluation/) — WER scoring. pyannote.metrics (DER)
+# ships with pyannote.audio above. The optional WER reference transcript also
+# needs `datasets` (pip install datasets), kept out of the default install.
+jiwer>=3.0
