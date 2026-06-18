@@ -67,13 +67,26 @@ def test_unlabeled_words_have_no_speaker():
     assert cues[0]["label"] is None
 
 
+def _write_srt(path, cues):
+    """cues: list of (start, end, text)."""
+    import srt as srt_lib
+    from datetime import timedelta
+    subs = [
+        srt_lib.Subtitle(index=i, start=timedelta(seconds=s), end=timedelta(seconds=e), content=t)
+        for i, (s, e, t) in enumerate(cues, start=1)
+    ]
+    path.write_text(srt_lib.compose(subs), encoding="utf-8")
+
+
 def test_word_level_srt_written(tmp_path):
     import json
     ann = _annotation([(0.0, 1.0, "SPEAKER_00"), (1.0, 2.0, "SPEAKER_01")])
     words_path = tmp_path / "x.words.json"
     words_path.write_text(json.dumps(_words((" a", 0.1, 0.4), (" b", 1.1, 1.4))), encoding="utf-8")
+    srt_path = tmp_path / "x.srt"
+    _write_srt(srt_path, [(0.0, 2.0, "a b")])  # cue covers both words
     out = tmp_path / "x_labeled.srt"
-    result = diarize._write_word_level_srt(words_path, ann, out, verbose=False)
+    result = diarize._write_word_level_srt(words_path, srt_path, ann, out, verbose=False)
     assert result == out
     content = out.read_text(encoding="utf-8")
     assert "[Speaker 1] a" in content
@@ -84,5 +97,28 @@ def test_empty_sidecar_returns_none(tmp_path):
     import json
     words_path = tmp_path / "e.words.json"
     words_path.write_text(json.dumps([]), encoding="utf-8")
+    srt_path = tmp_path / "e.srt"
+    _write_srt(srt_path, [(0.0, 1.0, "x")])
     out = tmp_path / "e_labeled.srt"
-    assert diarize._write_word_level_srt(words_path, _annotation([]), out, verbose=False) is None
+    assert diarize._write_word_level_srt(words_path, srt_path, _annotation([]), out, verbose=False) is None
+
+
+def test_filtered_hallucination_not_reintroduced(tmp_path):
+    """Reviewer's case: a cue removed by hallucination filtering must not come
+    back via the unfiltered word sidecar (issue #6 review)."""
+    import json
+    ann = _annotation([(0.0, 5.0, "SPEAKER_00")])
+    # Sidecar still has the hallucination words at [0.0,0.8] plus real content.
+    words_path = tmp_path / "h.words.json"
+    words_path.write_text(json.dumps(_words(
+        (" thank", 0.0, 0.4), (" you", 0.4, 0.8),
+        (" actual", 1.0, 1.4), (" content", 1.5, 1.9),
+    )), encoding="utf-8")
+    # Cleaned SRT: the "thank you" cue was removed, only the real cue survives.
+    srt_path = tmp_path / "h.srt"
+    _write_srt(srt_path, [(1.0, 1.9, "actual content")])
+    out = tmp_path / "h_labeled.srt"
+    diarize._write_word_level_srt(words_path, srt_path, ann, out, verbose=False)
+    content = out.read_text(encoding="utf-8").lower()
+    assert "thank you" not in content
+    assert "actual content" in content

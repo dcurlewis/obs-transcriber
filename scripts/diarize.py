@@ -92,9 +92,46 @@ def _words_to_labeled_cues(words: list, diarization, speaker_map: dict) -> list:
     return [c for c in cues if c["text"]]
 
 
-def _write_word_level_srt(words_path: Path, diarization, output_path: Path,
-                          verbose: bool) -> Path | None:
+def _kept_intervals(srt_path: Path) -> list | None:
+    """Time spans (start, end) of the cues present in ``srt_path``.
+
+    Used to gate the word sidecar: upstream hallucination filtering removes whole
+    cues from the SRT, so words whose timing falls in a removed span must also be
+    dropped — otherwise word-level diarization would rebuild them from the
+    unfiltered sidecar and reintroduce the hallucination (issue #6 review).
+    Returns None if the SRT can't be read (then no gating is applied).
+    """
+    try:
+        subs = list(srt.parse(Path(srt_path).read_text(encoding="utf-8")))
+    except (OSError, ValueError):
+        return None
+    return [(s.start.total_seconds(), s.end.total_seconds()) for s in subs]
+
+
+def _filter_words_to_intervals(words: list, intervals: list) -> list:
+    """Keep only words that overlap one of the (sorted) kept intervals."""
+    intervals = sorted(intervals)
+    n = len(intervals)
+    kept = []
+    j = 0
+    for w in sorted(words, key=lambda x: float(x.get("start", 0.0))):
+        try:
+            ws, we = float(w["start"]), float(w["end"])
+        except (TypeError, KeyError, ValueError):
+            continue
+        while j < n and intervals[j][1] <= ws:
+            j += 1
+        if j < n and intervals[j][0] < max(we, ws + 1e-3):
+            kept.append(w)
+    return kept
+
+
+def _write_word_level_srt(words_path: Path, srt_path: Path, diarization,
+                          output_path: Path, verbose: bool) -> Path | None:
     """Build a speaker-labeled SRT from a word-timings sidecar.
+
+    Words are gated to the cue spans of ``srt_path`` (the possibly
+    hallucination-filtered transcript) so filtered content is not reintroduced.
 
     Returns the output path, or None if the sidecar is empty/unusable so the
     caller can fall back to segment-level labeling.
@@ -105,6 +142,13 @@ def _write_word_level_srt(words_path: Path, diarization, output_path: Path,
         words = json.loads(Path(words_path).read_text(encoding="utf-8"))
     except (OSError, ValueError):
         return None
+    if not words:
+        return None
+
+    # Drop words that fall outside the (filtered) SRT's surviving cues.
+    intervals = _kept_intervals(srt_path)
+    if intervals is not None:
+        words = _filter_words_to_intervals(words, intervals)
     if not words:
         return None
 
@@ -249,7 +293,8 @@ def diarize(
     # uses tight word timings, which segment-level max-overlap cannot (issue #6).
     words_path = srt_path.with_suffix(".words.json")
     if words_path.exists():
-        result = _write_word_level_srt(words_path, diarization_result, output_path, verbose)
+        result = _write_word_level_srt(words_path, srt_path, diarization_result,
+                                       output_path, verbose)
         if result is not None:
             return result
         if verbose:
