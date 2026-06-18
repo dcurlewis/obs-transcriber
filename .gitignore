@@ -30,3 +30,6 @@ logs/
 # Coverage
 .coverage
 htmlcov/
+
+# Evaluation harness cache (downloaded AMI audio/references — large, not source)
+.eval_cache/
