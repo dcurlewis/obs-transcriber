@@ -123,7 +123,7 @@ def transcribe(
     model: str = "turbo",
     language: str = "en",
     verbose: bool = True,
-    backend: str = "whisper",
+    backend: str = "parakeet",
 ) -> Path:
     """
     Transcribe an audio file to SRT using the chosen ASR backend.
@@ -220,9 +220,9 @@ Examples:
     )
     parser.add_argument(
         "--backend",
-        default=os.environ.get("ASR_BACKEND", "whisper"),
+        default=os.environ.get("ASR_BACKEND", "parakeet"),
         choices=["whisper", "parakeet"],
-        help="ASR backend (default: $ASR_BACKEND or 'whisper')"
+        help="ASR backend (default: $ASR_BACKEND or 'parakeet')"
     )
     parser.add_argument(
         "-m", "--model",

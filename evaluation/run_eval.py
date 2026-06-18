@@ -57,7 +57,7 @@ def _transcribe(audio_path: Path, out_dir: Path, backend: str, model: str,
 def run_meeting(
     meeting: str,
     *,
-    asr_backend: str = "whisper",
+    asr_backend: str = "parakeet",
     asr_model: str = "turbo",
     language: str = "en",
     do_diarize: bool = True,
@@ -204,8 +204,8 @@ def main():
     )
     parser.add_argument("meetings", nargs="*", default=None,
                         help=f"AMI meeting IDs (default: {datasets_ami.DEFAULT_SUBSET})")
-    parser.add_argument("--asr-backend", default="whisper", choices=["whisper", "parakeet"],
-                        help="ASR backend (default: whisper)")
+    parser.add_argument("--asr-backend", default="parakeet", choices=["whisper", "parakeet"],
+                        help="ASR backend (default: parakeet)")
     parser.add_argument("--asr-model", default=os.getenv("WHISPER_MODEL", "turbo"),
                         help="ASR model (default: $WHISPER_MODEL or 'turbo')")
     parser.add_argument("-l", "--language", default=os.getenv("WHISPER_LANGUAGE", "en"))

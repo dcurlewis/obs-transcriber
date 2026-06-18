@@ -1,13 +1,13 @@
 # OBS Meeting Transcriber
 
-A set of scripts to automate the recording, transcription, and processing of multi-track meeting audio. This workflow uses OBS Studio to record, FFmpeg to process audio, and MLX Whisper for transcription (optimized for Apple Silicon Macs).
+A set of scripts to automate the recording, transcription, and processing of multi-track meeting audio. This workflow uses OBS Studio to record, FFmpeg to process audio, and NVIDIA Parakeet (via MLX, default) or MLX Whisper for transcription (optimized for Apple Silicon Macs).
 
 ## Features
 
 - **CLI Control**: Easily start, stop, and process recordings from the command line.
 - **Speaker Separation**: Automatically separates your audio from other participants' audio.
 - **Speaker Diarization**: Identifies and labels different speakers in the "Others" track.
-- **Fast & Accurate Transcription**: Utilizes MLX Whisper (Apple Silicon optimized via Metal) for high-quality, fast speech-to-text. Multiple model options (tiny, base, small, medium, large-v3, turbo, distil-large-v3) to balance speed and accuracy.
+- **Fast & Accurate Transcription**: Defaults to NVIDIA Parakeet (Apple Silicon optimized via MLX) for high-quality, fast speech-to-text, with MLX Whisper available as an alternative backend (`ASR_BACKEND=whisper`, model options: tiny, base, small, medium, large-v3, turbo, distil-large-v3).
 - **Audio Normalization**: Dynamic volume normalization and speech-frequency filtering (80Hz–8kHz) for consistent, clean input to the transcription engine.
 - **Audio Validation**: Validates audio files before transcription to catch corrupt or empty files early.
 - **Hallucination Filtering**: Removes common transcription artifacts and hallucinations.

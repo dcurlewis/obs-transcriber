@@ -8,7 +8,7 @@ OBS Meeting Transcriber is a set of scripts to automate the recording, transcrip
 
 - OBS Studio to record
 - FFmpeg to process audio
-- MLX Whisper for transcription (optimized for Apple Silicon)
+- NVIDIA Parakeet (via MLX, default) or MLX Whisper for transcription (optimized for Apple Silicon), selected via `ASR_BACKEND`
 
 ## Environment Setup
 
@@ -89,7 +89,7 @@ The codebase consists of:
 4. **Data Flow**:
    - Recording creation: OBS creates a MKV file with multiple audio tracks
    - Audio extraction: FFmpeg extracts "Me" and "Others" audio tracks as separate WAV files
-   - Transcription: Whisper converts WAV files to SRT transcripts
+   - Transcription: the ASR backend (Parakeet by default, or Whisper) converts WAV files to SRT transcripts
    - Post-processing: Hallucination filtering cleans transcripts
    - Final output: Interleaving script combines transcripts into a chronological TXT file
 

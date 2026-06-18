@@ -12,9 +12,10 @@ if [ -f .env ]; then
 fi
 
 # Set defaults if not provided in .env
-# ASR backend: 'whisper' (MLX Whisper, default) or 'parakeet' (NVIDIA Parakeet via MLX).
-# Exported so scripts/transcribe.py picks it up automatically. See issue #4.
-ASR_BACKEND=${ASR_BACKEND:-whisper}
+# ASR backend: 'parakeet' (NVIDIA Parakeet via MLX, default) or 'whisper' (MLX Whisper).
+# Parakeet is more accurate and faster on Apple Silicon (see issue #4).
+# Exported so scripts/transcribe.py picks it up automatically.
+ASR_BACKEND=${ASR_BACKEND:-parakeet}
 export ASR_BACKEND
 # Default to 'turbo' model (large-v3-turbo) for best speed/accuracy balance on Apple Silicon
 WHISPER_MODEL=${WHISPER_MODEL:-turbo}
@@ -763,8 +764,8 @@ if [ -z "$1" ]; then
     echo "  web           - Start the web UI (http://localhost:5000)"
     echo ""
     echo "Environment Variables:"
-    echo "  ASR_BACKEND=whisper        ASR backend: whisper (default) or parakeet"
-    echo "  WHISPER_MODEL=turbo        Whisper model to use (default: turbo; ASR_BACKEND=whisper)"
+    echo "  ASR_BACKEND=parakeet       ASR backend: parakeet (default) or whisper"
+    echo "  WHISPER_MODEL=turbo        Whisper model (default: turbo; only when ASR_BACKEND=whisper)"
     echo "                             Options: tiny, base, small, medium, large-v3, turbo, distil-large-v3"
     echo "  WHISPER_LANGUAGE=en        Language code for transcription (default: en)"
     echo "  KEEP_RAW_RECORDING=true    Retain raw MKV files for troubleshooting (default: false)"
