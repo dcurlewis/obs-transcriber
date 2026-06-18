@@ -59,6 +59,9 @@ The main entry point is `run.sh` which handles all operations:
 - **Process Recordings**: `./run.sh process`
 - **Check Queue Status**: `./run.sh status`
 - **Discard a Recording**: `./run.sh discard`
+- **Start Web UI**: `./run.sh web` (serves the browser UI at http://localhost:5000; runs `python -m web.app`)
+
+The web UI is the recommended interface for day-to-day use. It wraps the same recording/processing logic as the CLI, adds one-click controls, and surfaces the day's calendar meetings. Configure it via these `.env` variables: `WEB_HOST` (default `127.0.0.1`), `WEB_PORT` (default `5000`), and `FLASK_DEBUG` (default `False`). Calendar filtering uses `CALENDAR_INCLUDE` / `CALENDAR_EXCLUDE` (comma-separated calendar-name substrings) and `USER_EMAIL` to identify yourself among attendees.
 
 ## Code Architecture
 
@@ -75,15 +78,22 @@ The codebase consists of:
    - `scripts/transcribe.py` - Transcribes audio using MLX Whisper (Apple Silicon optimized)
    - `scripts/interleave.py` - Merges separate transcripts into a single chronological file
    - `scripts/filter_hallucinations.py` - Removes common hallucinations from Whisper transcriptions
+   - Shared support modules used by both the CLI and web app: `scripts/config.py` (loads `.env` config), `scripts/queue_manager.py` (atomic reads/writes of `processing_queue.csv`), `scripts/root_detection.py` (locates the project root and sets up imports), `scripts/log_sanitizer.py` (redacts sensitive data from logs), and `scripts/dependencies.py` (startup dependency checks)
 
-3. **Data Flow**:
+3. **Web App** (`web/`): A Flask server that provides a browser UI over the same recording/processing logic as the CLI.
+   - `web/app.py` - Flask server and JSON API. Routes: `/` (UI), `/api/status`, `/api/meetings`, `/api/start`, `/api/stop`, `/api/abort`, `/api/process`, `/api/processing-status`, `/api/discard`. Launched via `run.sh web` (`python -m web.app`).
+   - `web/recorder.py` - `RecordingController`: orchestrates start/stop/abort recording (shelling out to `obs_controller.py`, auto-launching OBS if needed), manages the `.pending_meeting` file and the queue via `QueueManager`, and runs `run.sh process` in a background thread with output logged to `logs/processing.log`.
+   - `web/calendar_service.py` - `CalendarService`: reads the day's meetings from macOS Calendar.app via EventKit (PyObjC). Filters out all-day events, solo events, and stale past meetings; extracts Zoom links and accepted/tentative attendee names. macOS-only (degrades to an empty list elsewhere).
+   - `web/templates/index.html`, `web/static/` - Frontend UI (HTML, `app.js`, `style.css`).
+
+4. **Data Flow**:
    - Recording creation: OBS creates a MKV file with multiple audio tracks
    - Audio extraction: FFmpeg extracts "Me" and "Others" audio tracks as separate WAV files
    - Transcription: Whisper converts WAV files to SRT transcripts
    - Post-processing: Hallucination filtering cleans transcripts
    - Final output: Interleaving script combines transcripts into a chronological TXT file
 
-4. **File Organization**:
+5. **File Organization**:
    - `processing_queue.csv` - Tracks recording status (recorded, processed, discarded)
    - `recordings/` (or configured path) - Contains final transcript files:
      - `YYYYMMDD-Meeting-Name_transcript.txt`
