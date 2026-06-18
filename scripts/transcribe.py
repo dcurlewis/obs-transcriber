@@ -6,6 +6,7 @@ and outputs SRT format subtitles.
 """
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -72,8 +73,12 @@ def write_srt(segments: list, output_path: Path) -> None:
             f.write("\n")
 
 
-def _whisper_segments(audio_path: Path, model: str, language: str, verbose: bool) -> list:
-    """Transcribe with MLX Whisper, returning a list of {start, end, text} segments."""
+def _whisper_segments(audio_path: Path, model: str, language: str, verbose: bool):
+    """Transcribe with MLX Whisper.
+
+    Returns (segments, words): segment dicts {start, end, text} for the SRT, and
+    word dicts {text, start, end} for word-level speaker assignment (issue #6).
+    """
     model_path = MODEL_MAPPING.get(model, model)
     if verbose:
         print(f"🎯 Backend: whisper | Model: {model} ({model_path})")
@@ -87,17 +92,25 @@ def _whisper_segments(audio_path: Path, model: str, language: str, verbose: bool
         condition_on_previous_text=False,  # Reduces hallucinations
         no_speech_threshold=0.6,  # Filter out non-speech segments
         compression_ratio_threshold=2.4,  # Filter garbled audio
-        word_timestamps=False,  # We only need segment-level timestamps for SRT
+        word_timestamps=True,  # also produce word-level timings for diarization
         verbose=verbose,
     )
-    return result.get('segments', [])
+    segments = result.get('segments', [])
+    words = [
+        {"text": w.get("word", ""), "start": w.get("start"), "end": w.get("end")}
+        for seg in segments
+        for w in seg.get("words", [])
+        if w.get("start") is not None and w.get("end") is not None
+    ]
+    return segments, words
 
 
-def _parakeet_segments(audio_path: Path, model: str, verbose: bool) -> list:
-    """Transcribe with NVIDIA Parakeet (MLX), returning {start, end, text} segments.
+def _parakeet_segments(audio_path: Path, model: str, verbose: bool):
+    """Transcribe with NVIDIA Parakeet (MLX).
 
-    Parakeet auto-detects language (no language arg). Long audio is processed in
-    overlapping chunks. Sentence-level alignments map directly to SRT segments.
+    Returns (segments, words). Parakeet auto-detects language and processes long
+    audio in overlapping chunks. Sentence alignments map to SRT segments; the
+    per-sentence tokens give word-level timings for diarization (issue #6).
     """
     try:
         from parakeet_mlx import from_pretrained
@@ -111,10 +124,13 @@ def _parakeet_segments(audio_path: Path, model: str, verbose: bool) -> list:
 
     pk = from_pretrained(model)
     result = pk.transcribe(str(audio_path), chunk_duration=120.0, overlap_duration=15.0)
-    return [
-        {"start": s.start, "end": s.end, "text": s.text}
+    segments = [{"start": s.start, "end": s.end, "text": s.text} for s in result.sentences]
+    words = [
+        {"text": t.text, "start": t.start, "end": t.end}
         for s in result.sentences
+        for t in s.tokens
     ]
+    return segments, words
 
 
 def transcribe(
@@ -162,9 +178,9 @@ def transcribe(
         # A Whisper-style model name (or the default 'turbo') means "use the
         # default Parakeet model" rather than a literal repo id.
         pk_model = model if "parakeet" in model else PARAKEET_MODEL
-        segments = _parakeet_segments(audio_path, pk_model, verbose)
+        segments, words = _parakeet_segments(audio_path, pk_model, verbose)
     elif backend == "whisper":
-        segments = _whisper_segments(audio_path, model, language, verbose)
+        segments, words = _whisper_segments(audio_path, model, language, verbose)
     else:
         raise ValueError(f"Unknown ASR backend: {backend!r} (expected 'whisper' or 'parakeet')")
 
@@ -181,6 +197,15 @@ def transcribe(
         write_srt(segments, output_path)
         if verbose:
             print(f"✅ Transcription complete: {len(segments)} segments")
+
+    # Write a word-level sidecar (<stem>.words.json) for word-level speaker
+    # assignment in diarize.py (issue #6). Best-effort: absence just means the
+    # diarizer falls back to segment-level labeling.
+    if words:
+        words_path = output_dir / (audio_path.stem + ".words.json")
+        words_path.write_text(json.dumps(words), encoding="utf-8")
+        if verbose:
+            print(f"💾 Word timings: {words_path} ({len(words)} words)")
 
     if verbose:
         print(f"💾 Output: {output_path}")

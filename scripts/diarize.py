@@ -13,6 +13,7 @@ This format is consumed directly by interleave.py which expects the
 import argparse
 import os
 import sys
+from datetime import timedelta
 from pathlib import Path
 
 try:
@@ -55,6 +56,83 @@ def _human_label(raw_speaker: str, speaker_map: dict) -> str:
     if raw_speaker not in speaker_map:
         speaker_map[raw_speaker] = f"Speaker {len(speaker_map) + 1}"
     return speaker_map[raw_speaker]
+
+
+def _words_to_labeled_cues(words: list, diarization, speaker_map: dict) -> list:
+    """Assign a speaker to each word, then group consecutive same-speaker words.
+
+    `words` is a list of {text, start, end}. Returns cue dicts
+    {start, end, label, text} where `label` is a human label or None (unknown).
+    Word-level grouping splits a transcript at speaker changes that whole-segment
+    labeling would miss, and uses tight word timings (issue #6).
+    """
+    cues: list = []
+    cur = None
+    for w in words:
+        try:
+            start = float(w["start"])
+            end = float(w["end"])
+        except (TypeError, KeyError, ValueError):
+            continue
+        text = w.get("text", "")
+        # Guard against zero-duration tokens so overlap is well-defined.
+        raw = _dominant_speaker(start, max(end, start + 1e-3), diarization)
+        label = _human_label(raw, speaker_map) if raw else None
+        if cur is not None and cur["label"] == label:
+            cur["end"] = end
+            cur["text"] += text
+        else:
+            if cur is not None:
+                cues.append(cur)
+            cur = {"start": start, "end": end, "label": label, "text": text}
+    if cur is not None:
+        cues.append(cur)
+    for c in cues:
+        c["text"] = c["text"].strip()
+    return [c for c in cues if c["text"]]
+
+
+def _write_word_level_srt(words_path: Path, diarization, output_path: Path,
+                          verbose: bool) -> Path | None:
+    """Build a speaker-labeled SRT from a word-timings sidecar.
+
+    Returns the output path, or None if the sidecar is empty/unusable so the
+    caller can fall back to segment-level labeling.
+    """
+    import json
+
+    try:
+        words = json.loads(Path(words_path).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if not words:
+        return None
+
+    speaker_map: dict[str, str] = {}
+    cues = _words_to_labeled_cues(words, diarization, speaker_map)
+    if not cues:
+        return None
+
+    subtitles = []
+    for i, c in enumerate(cues, start=1):
+        content = f"[{c['label']}] {c['text']}" if c["label"] else c["text"]
+        subtitles.append(srt.Subtitle(
+            index=i,
+            start=timedelta(seconds=c["start"]),
+            end=timedelta(seconds=c["end"]),
+            content=content,
+        ))
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write(srt.compose(subtitles))
+
+    if verbose:
+        labeled = sum(1 for c in cues if c["label"])
+        print(f"💬 Word-level: {len(cues)} cues, {labeled} labeled, "
+              f"{len(speaker_map)} speaker(s)")
+        print(f"💾 Output: {output_path}")
+    return output_path
 
 
 # Diarization model. Defined once so both the production pipeline and the
@@ -165,6 +243,17 @@ def diarize(
         diarization_result = run_diarization(audio_path, hf_token, device, verbose)
     else:
         diarization_result = diarization
+
+    # Prefer word-level speaker assignment when a word-timings sidecar exists
+    # (written by transcribe.py). It splits at within-segment speaker changes and
+    # uses tight word timings, which segment-level max-overlap cannot (issue #6).
+    words_path = srt_path.with_suffix(".words.json")
+    if words_path.exists():
+        result = _write_word_level_srt(words_path, diarization_result, output_path, verbose)
+        if result is not None:
+            return result
+        if verbose:
+            print("ℹ️  Word sidecar unusable; falling back to segment-level labeling.")
 
     with open(srt_path, "r", encoding="utf-8") as f:
         subtitles = list(srt.parse(f.read()))
