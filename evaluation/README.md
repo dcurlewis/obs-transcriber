@@ -80,8 +80,10 @@ and the harness together.
 
 ### Comparing changes (#3–#6)
 
-- **#3 diarization model**: after pointing `scripts/diarize.py` at
-  `community-1`, re-run and pass `--diar-model-label pyannote/speaker-diarization-community-1`.
+- **#3 diarization model**: A/B without editing code by overriding the model via
+  the `DIARIZATION_MODEL` env var, e.g.
+  `DIARIZATION_MODEL=pyannote/speaker-diarization-3.1 python -m evaluation.run_eval IS1009a --diar-model-label pyannote/speaker-diarization-3.1`.
+  Default is `community-1`.
 - **#4 Parakeet ASR**: implement the `parakeet` branch in `run_eval._transcribe`,
   then `--asr-backend parakeet`.
 - **#5 VAD / #6 word-level assignment**: changes land in the pipeline; just re-run

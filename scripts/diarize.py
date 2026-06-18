@@ -57,9 +57,14 @@ def _human_label(raw_speaker: str, speaker_map: dict) -> str:
     return speaker_map[raw_speaker]
 
 
-# Diarization model. Bumping this (e.g. to speaker-diarization-community-1 in #3)
-# updates both the production pipeline and the evaluation harness in one place.
-DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+# Diarization model. Defined once so both the production pipeline and the
+# evaluation harness stay in sync. Requires pyannote.audio 4.x. The model is
+# gated on HuggingFace — accept its conditions at
+# https://huggingface.co/pyannote/speaker-diarization-community-1
+# Overridable via DIARIZATION_MODEL env var (handy for A/B-ing models in eval).
+DIARIZATION_MODEL = os.environ.get(
+    "DIARIZATION_MODEL", "pyannote/speaker-diarization-community-1"
+)
 
 
 def run_diarization(
@@ -98,14 +103,17 @@ def run_diarization(
 
     pipeline = Pipeline.from_pretrained(
         DIARIZATION_MODEL,
-        use_auth_token=hf_token,
+        token=hf_token,  # pyannote.audio 4.x renamed use_auth_token -> token
     )
     pipeline.to(torch_device)
 
     if verbose:
         print(f"⏳ Running diarization on: {audio_path.name}")
 
-    diarization_result = pipeline(str(audio_path))
+    output = pipeline(str(audio_path))
+    # pyannote.audio 4.x returns a result object whose Annotation is exposed as
+    # `.speaker_diarization`; 3.x returned the Annotation directly. Support both.
+    diarization_result = getattr(output, "speaker_diarization", output)
 
     detected_speakers = sorted(
         {speaker for _, _, speaker in diarization_result.itertracks(yield_label=True)}
@@ -200,10 +208,9 @@ def main():
         epilog="""
 One-time setup:
   1. Create a HuggingFace account at https://huggingface.co
-  2. Accept the model license at https://huggingface.co/pyannote/speaker-diarization-3.1
-  3. Accept the model license at https://huggingface.co/pyannote/segmentation-3.0
-  4. Generate a read token at https://huggingface.co/settings/tokens
-  5. Add HF_TOKEN=<your_token> to your .env file
+  2. Accept the model conditions at https://huggingface.co/pyannote/speaker-diarization-community-1
+  3. Generate a read token at https://huggingface.co/settings/tokens
+  4. Add HF_TOKEN=<your_token> to your .env file
 
 Examples:
   %(prog)s others.wav others.srt -o others_labeled.srt
@@ -235,9 +242,8 @@ Examples:
             "❌ Error: HuggingFace token required for pyannote model access.\n"
             "   Set HF_TOKEN=<token> in your .env file, or pass --token <token>.\n"
             "   Get a token at: https://huggingface.co/settings/tokens\n"
-            "   Accept model licenses at:\n"
-            "     https://huggingface.co/pyannote/speaker-diarization-3.1\n"
-            "     https://huggingface.co/pyannote/segmentation-3.0",
+            "   Accept the model conditions at:\n"
+            "     https://huggingface.co/pyannote/speaker-diarization-community-1",
             file=sys.stderr,
         )
         sys.exit(1)

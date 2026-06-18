@@ -53,10 +53,9 @@ Before you begin, ensure you have the following installed:
     Speaker diarization identifies individual speakers in the "Others" track (e.g. "Speaker 1", "Speaker 2"). It is disabled by default and requires a one-time HuggingFace setup:
 
     1. Create a HuggingFace account at <https://huggingface.co>
-    2. Accept the model license: <https://huggingface.co/pyannote/speaker-diarization-3.1>
-    3. Accept the model license: <https://huggingface.co/pyannote/segmentation-3.0>
-    4. Generate a read token: <https://huggingface.co/settings/tokens>
-    5. Add the following to your `.env` file:
+    2. Accept the model conditions: <https://huggingface.co/pyannote/speaker-diarization-community-1>
+    3. Generate a read token: <https://huggingface.co/settings/tokens>
+    4. Add the following to your `.env` file:
 
     ```ini
     ENABLE_DIARIZATION=true
