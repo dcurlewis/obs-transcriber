@@ -20,9 +20,13 @@ committed. Nothing here imports heavy deps at module load.
 
 from __future__ import annotations
 
+import json
 import os
 import ssl
 import sys
+import time
+import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -35,10 +39,16 @@ if str(_ROOT) not in sys.path:
 from root_detection import find_project_root
 
 AMI_AUDIO_BASE = "https://groups.inf.ed.ac.uk/ami/AMICorpusMirror/amicorpus"
-RTTM_BASE = (
-    "https://raw.githubusercontent.com/pyannote/AMI-diarization-setup/main/only_words/rttms"
-)
+_SETUP_BASE = "https://raw.githubusercontent.com/pyannote/AMI-diarization-setup/main"
+RTTM_BASE = f"{_SETUP_BASE}/only_words/rttms"
+UEM_BASE = f"{_SETUP_BASE}/uems"
 RTTM_SPLITS = ("test", "dev", "train")
+
+# WER reference text: the HF datasets-server filter API over edinburghcstr/ami.
+# Pure HTTP (no `datasets` package, no audio download). The server warms up a
+# filter index on first query, briefly returning 500 / "index is loading".
+_FILTER_API = "https://datasets-server.huggingface.co/filter"
+_AMI_HF_SPLITS = ("test", "train", "validation")
 
 # Short 4-participant scenario meetings (the "a" sessions are the shortest),
 # which mirrors a typical small meeting and keeps eval runs fast.
@@ -116,52 +126,95 @@ def fetch_rttm(meeting: str, cache_dir: Path | None = None) -> Path:
     )
 
 
+def fetch_uem(meeting: str, cache_dir: Path | None = None) -> Path | None:
+    """Download the meeting's UEM (evaluation map), trying each split.
+
+    The UEM bounds the scored region so raw DER is comparable to pyannote's
+    published numbers. Returns None if unavailable (DER then falls back to the
+    union of reference+hypothesis extents).
+    """
+    cache_dir = cache_dir or default_cache_dir()
+    dest = cache_dir / "uems" / f"{meeting}.uem"
+    if dest.exists() and dest.stat().st_size > 0:
+        return dest
+    for split in RTTM_SPLITS:
+        try:
+            return _download(f"{UEM_BASE}/{split}/{meeting}.uem", dest)
+        except Exception:
+            continue
+    return None
+
+
+def _filter_query(meeting: str, split: str, offset: int, length: int,
+                  retries: int = 10, backoff: float = 8.0) -> dict:
+    """One datasets-server /filter page, retrying through transient 500s.
+
+    The server returns ``{"error": "...index is loading..."}`` (as an HTTP 500
+    body) while it warms up; we retry with backoff until it succeeds.
+    """
+    where = urllib.parse.quote(f'"meeting_id"=\'{meeting}\'')
+    url = (f"{_FILTER_API}?dataset=edinburghcstr/ami&config=ihm&split={split}"
+           f"&where={where}&offset={offset}&length={length}")
+    req = urllib.request.Request(url, headers={"User-Agent": "obs-transcriber-eval"})
+    last = {"error": "no response"}
+    for i in range(retries):
+        try:
+            with urllib.request.urlopen(req, context=_ssl_context()) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            try:
+                last = json.load(e)  # transient errors carry a JSON body
+            except Exception:
+                last = {"error": f"HTTP {e.code}"}
+        except Exception as e:
+            last = {"error": str(e)}
+        if i < retries - 1:
+            time.sleep(backoff)
+    return last
+
+
 def fetch_reference_transcript(meeting: str, cache_dir: Path | None = None) -> Path | None:
     """Build a whole-meeting reference transcript for WER, if possible.
 
-    Uses the Hugging Face ``edinburghcstr/ami`` dataset (segment text ordered by
-    start time). Returns the path to a cached ``.txt`` reference, or ``None`` if
-    the ``datasets`` package is unavailable or the meeting can't be resolved
-    (in which case WER is simply skipped).
-
-    NOTE: the exact ``edinburghcstr/ami`` schema should be validated on first
-    real run; failures here are non-fatal by design.
+    Pulls the meeting's segment texts from the HF datasets-server filter API
+    over ``edinburghcstr/ami`` (ordered by start time), trying each HF split.
+    Pure HTTP — no ``datasets`` package and no audio download. Returns the
+    cached ``.txt`` path, or ``None`` if the meeting can't be resolved (WER is
+    then simply skipped; DER still runs).
     """
     cache_dir = cache_dir or default_cache_dir()
     dest = cache_dir / "transcripts" / f"{meeting}.txt"
     if dest.exists() and dest.stat().st_size > 0:
         return dest
 
-    try:
-        from datasets import load_dataset
-    except ImportError:
-        return None
+    for split in _AMI_HF_SPLITS:
+        first = _filter_query(meeting, split, 0, 100)
+        if "error" in first:
+            return None  # API/index unavailable — non-fatal
+        total = first.get("num_rows_total") or 0
+        if total == 0:
+            continue  # meeting not in this split; try the next
 
-    try:
-        # The "ihm" config is segmented per utterance with meeting_id + timing.
-        # Stream and drop the (large) audio column so we only pull text — never
-        # the multi-GB audio. We collect every segment for this meeting, then
-        # order by start time to reconstruct the whole-meeting reference.
-        ds = load_dataset(
-            "edinburghcstr/ami", "ihm", split="test",
-            streaming=True, trust_remote_code=True,
-        )
-        if "audio" in (ds.column_names or []):
-            ds = ds.remove_columns("audio")
-        rows = [r for r in ds if r.get("meeting_id") == meeting]
-        if not rows:
-            return None
-        rows.sort(key=lambda r: float(r.get("begin_time", 0.0)))
-        text = " ".join(str(r.get("text", "")).strip() for r in rows if r.get("text"))
+        rows: list[tuple[float, str]] = []
+        offset = 0
+        while offset < total:
+            page = first if offset == 0 else _filter_query(meeting, split, offset, 100)
+            batch = page.get("rows", [])
+            if not batch:
+                break
+            for item in batch:
+                row = item.get("row", {})
+                rows.append((float(row.get("begin_time", 0.0)), row.get("text", "")))
+            offset += len(batch)
+
+        text = " ".join(t.strip() for _, t in sorted(rows) if t)
         if not text.strip():
             return None
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_text(text, encoding="utf-8")
         return dest
-    except Exception:
-        # Best-effort: schema/availability of the HF dataset may change. WER is
-        # skipped (DER still runs) rather than failing the whole eval.
-        return None
+
+    return None  # not found in any split
 
 
 def ensure_meeting(
@@ -180,6 +233,7 @@ def ensure_meeting(
         "meeting": meeting,
         "audio": fetch_audio(meeting, cache_dir),
         "rttm": fetch_rttm(meeting, cache_dir),
+        "uem": fetch_uem(meeting, cache_dir),
         "transcript": None,
     }
     if want_transcript:
@@ -203,4 +257,5 @@ if __name__ == "__main__":
         info = ensure_meeting(m, want_transcript=not args.no_transcript)
         print(f"  audio:      {info['audio']}")
         print(f"  rttm:       {info['rttm']}")
+        print(f"  uem:        {info['uem'] or '(unavailable — DER falls back to ref+hyp extents)'}")
         print(f"  transcript: {info['transcript'] or '(unavailable — WER will be skipped)'}")

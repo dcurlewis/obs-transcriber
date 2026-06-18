@@ -14,6 +14,6 @@ pyobjc-framework-EventKit>=10.0
 pytest>=9.0
 pytest-cov>=7.0
 # Evaluation harness (see evaluation/) — WER scoring. pyannote.metrics (DER)
-# ships with pyannote.audio above. The optional WER reference transcript also
-# needs `datasets` (pip install datasets), kept out of the default install.
+# ships with pyannote.audio above; the WER reference transcript is fetched over
+# plain HTTP (HF datasets-server), so no extra dataset library is required.
 jiwer>=3.0

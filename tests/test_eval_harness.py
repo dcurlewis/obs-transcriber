@@ -58,5 +58,6 @@ def test_full_pipeline_eval():
     assert row["error"] is None, row["error"]
     if row["wer"] is not None:
         assert 0.0 <= row["wer"]["wer"] < 1.0
-    if row["der"] is not None:
-        assert 0.0 <= row["der"]["der"] < 1.0
+    for key in ("der", "der_raw"):
+        if row[key] is not None:
+            assert 0.0 <= row[key]["der"] < 1.0

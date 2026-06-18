@@ -32,8 +32,12 @@ Audio and the diarization RTTM references are downloaded on demand into
 ```bash
 source venv/bin/activate
 pip install -r requirements.txt          # adds jiwer; pyannote.metrics ships with pyannote.audio
-pip install datasets                      # OPTIONAL — only needed for WER reference text
 ```
+
+The WER reference transcript is fetched over plain HTTP from the HF
+datasets-server (no `datasets` package needed). On the very first fetch the
+server spends ~30–60 s building a filter index (the harness retries through
+the transient "index is loading" responses), then caches the result.
 
 Diarization (DER) needs a HuggingFace token with the pyannote model licenses
 accepted — same setup as `scripts/diarize.py` (`HF_TOKEN` in `.env`).
@@ -58,9 +62,21 @@ python -m evaluation.run_eval --asr-model large-v3 --no-diarize
 python -m evaluation.run_eval IS1009a ES2004a --collar 0.25
 ```
 
-Output is a Markdown table (WER, DER + miss/false-alarm/confusion, timings).
-Use `--collar 0.0` (default) for numbers comparable to pyannote's published
-benchmarks; `--collar 0.25` for the older lenient scoring.
+Output is a Markdown table with two DER columns plus timings:
+
+- **DER (raw)** — pyannote's *native* diarization output, UEM-bounded. This is
+  the apples-to-apples number for comparing diarization *models* (#3), closest
+  to pyannote's published figures. Miss / FA / Conf are reported for this.
+- **DER (srt)** — speaker labels applied to Whisper segments by max-overlap, i.e.
+  what the pipeline *actually* emits in the transcript. The gap between the two
+  is the cost of segment-span labeling and is what #6 (word-level assignment)
+  targets.
+
+Both come from a single pyannote run. Use `--collar 0.0` (default) for numbers
+comparable to pyannote's published benchmarks; `--collar 0.25` for the older
+lenient scoring. The diarization model is defined once in
+`scripts/diarize.py::DIARIZATION_MODEL`, so #3's model bump updates the pipeline
+and the harness together.
 
 ### Comparing changes (#3–#6)
 
@@ -86,12 +102,12 @@ RUN_EVAL=1 RUN_EVAL_FULL=1 python -m pytest tests/test_eval_harness.py -m eval -
 
 ## Status / known limitations
 
-- **DER path** is wired end-to-end and verified against real AMI ground truth.
-- **WER reference** auto-fetch is best-effort via the optional `datasets` package;
-  if unavailable the harness reports WER as `—` and still produces DER. You can
-  always pass your own reference transcript by writing one to
-  `.eval_cache/ami/transcripts/<MEETING>.txt`.
+- **DER** (raw + srt) is wired end-to-end and verified against real AMI ground
+  truth, UEM-bounded when the UEM is available.
+- **WER reference** is fetched from the HF datasets-server filter API over
+  `edinburghcstr/ami` (pure HTTP). If the service is unavailable the harness
+  reports WER as `—` and still produces DER. You can also drop your own
+  reference at `.eval_cache/ami/transcripts/<MEETING>.txt`.
 - RTFx/throughput numbers are wall-clock on *this* machine — use for relative
   comparison, not as absolute leaderboard figures.
-- Baseline numbers for today's stack are **not yet recorded** — run the baseline
-  command above (needs a HF token for the DER half) and paste the table into #2.
+- Baseline numbers for today's stack are recorded in issue #2.

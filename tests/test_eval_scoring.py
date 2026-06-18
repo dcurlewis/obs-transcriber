@@ -168,3 +168,19 @@ class TestDER:
         # Scoring an annotation against itself is a perfect score.
         res = scoring.compute_der(ann, ann)
         assert res.der == pytest.approx(0.0)
+
+    def test_uem_bounds_scored_region(self, tmp_path):
+        # Reference speaks 0-10s; hypothesis only covers 0-5s (misses 5-10s).
+        ref_p = tmp_path / "ref.rttm"
+        ref_p.write_text(_rttm("m", [(0.0, 10.0, "A")]), encoding="utf-8")
+        ref = scoring.load_rttm(ref_p, uri="m")
+        hyp_p = tmp_path / "hyp.rttm"
+        hyp_p.write_text(_rttm("m", [(0.0, 5.0, "A")]), encoding="utf-8")
+        hyp = scoring.load_rttm(hyp_p, uri="m")
+        # A UEM that only scores 0-5s should exclude the missed region → DER 0.
+        uem_p = tmp_path / "m.uem"
+        uem_p.write_text("m 1 0.000 5.000\n", encoding="utf-8")
+        uem = scoring.load_uem(uem_p, uri="m")
+        res = scoring.compute_der(ref, hyp, uem=uem)
+        assert res.der == pytest.approx(0.0)
+        assert res.total == pytest.approx(5.0)

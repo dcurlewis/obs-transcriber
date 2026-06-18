@@ -221,6 +221,25 @@ def load_rttm(rttm_path: str | Path, uri: str | None = None) -> "Annotation":
     return annotation
 
 
+def load_uem(uem_path: str | Path, uri: str | None = None):
+    """Parse a UEM file into a pyannote Timeline (the scored region).
+
+    UEM lines: ``<file> <chan> <start> <end>``. Returns None-safe Timeline.
+    """
+    from pyannote.core import Segment, Timeline
+
+    segments = []
+    for line in Path(uem_path).read_text(encoding="utf-8").splitlines():
+        parts = line.split()
+        if len(parts) < 4:
+            continue
+        file_id, _chan, start, end = parts[0], parts[1], parts[2], parts[3]
+        if uri is not None and file_id != uri:
+            continue
+        segments.append(Segment(float(start), float(end)))
+    return Timeline(segments, uri=uri or Path(uem_path).stem)
+
+
 # --------------------------------------------------------------------------- #
 # DER
 # --------------------------------------------------------------------------- #

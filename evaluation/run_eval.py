@@ -80,7 +80,8 @@ def run_meeting(
         "asr_model": asr_model,
         "diar_model": diar_model_label if do_diarize else None,
         "wer": None,
-        "der": None,
+        "der": None,        # SRT-derived labels (what the pipeline actually emits)
+        "der_raw": None,    # pyannote's native output (comparable to published DER)
         "transcribe_s": None,
         "diarize_s": None,
         "error": None,
@@ -106,21 +107,39 @@ def run_meeting(
             if not hf_token:
                 row["error"] = "diarization requested but HF_TOKEN not set; DER skipped"
             else:
-                labeled = work_dir / f"{meeting}_labeled.srt"
                 import diarize  # scripts/diarize.py
+
+                # Run the pyannote pipeline once; score both its native output
+                # and the SRT-derived labels the pipeline ultimately emits.
                 t0 = time.monotonic()
+                diar_ann = diarize.run_diarization(
+                    str(audio), hf_token, device=device, verbose=verbose
+                )
+                row["diarize_s"] = round(time.monotonic() - t0, 1)
+
+                ref_ann = scoring.load_rttm(info["rttm"], uri=meeting)
+                uem = scoring.load_uem(info["uem"], uri=meeting) if info.get("uem") else None
+
+                # Raw: pyannote's native diarization, UEM-bounded → comparable
+                # to published DER.
+                row["der_raw"] = scoring.compute_der(
+                    ref_ann, diar_ann, collar=collar, uem=uem
+                ).as_dict()
+
+                # SRT-derived: speaker labels applied to Whisper segments (the
+                # pipeline's actual transcript output), reusing the same run.
+                labeled = work_dir / f"{meeting}_labeled.srt"
                 diarize.diarize(
                     audio_path=str(audio),
                     srt_path=str(srt_path),
                     output_path=str(labeled),
-                    hf_token=hf_token,
-                    device=device,
                     verbose=verbose,
+                    diarization=diar_ann,
                 )
-                row["diarize_s"] = round(time.monotonic() - t0, 1)
-                ref_ann = scoring.load_rttm(info["rttm"], uri=meeting)
                 hyp_ann = scoring.srt_to_annotation(labeled, uri=meeting)
-                row["der"] = scoring.compute_der(ref_ann, hyp_ann, collar=collar).as_dict()
+                row["der"] = scoring.compute_der(
+                    ref_ann, hyp_ann, collar=collar, uem=uem
+                ).as_dict()
     except Exception as e:  # one bad meeting shouldn't abort the whole run
         row["error"] = f"{type(e).__name__}: {e}"
 
@@ -134,25 +153,29 @@ def _pct(x: float | None) -> str:
 def render_markdown(rows: list[dict]) -> str:
     """Render results as a Markdown table."""
     header = (
-        "| Meeting | ASR backend | ASR model | Diar model | WER | DER | Miss | FA | Conf | "
-        "Transcribe (s) | Diarize (s) |"
+        "| Meeting | ASR backend | ASR model | Diar model | WER | DER (raw) | "
+        "DER (srt) | Miss | FA | Conf | Transcribe (s) | Diarize (s) |"
     )
-    sep = "|" + "|".join(["---"] * 11) + "|"
+    sep = "|" + "|".join(["---"] * 12) + "|"
     lines = [header, sep]
     for r in rows:
         wer = r.get("wer") or {}
+        der_raw = r.get("der_raw") or {}
         der = r.get("der") or {}
-        total = der.get("total") or 0
-        miss = der.get("missed_detection")
-        fa = der.get("false_alarm")
-        conf = der.get("confusion")
+        # Miss/FA/Conf shown for the raw (native) diarization output.
+        total = der_raw.get("total") or 0
+        miss = der_raw.get("missed_detection")
+        fa = der_raw.get("false_alarm")
+        conf = der_raw.get("confusion")
         lines.append(
-            "| {meeting} | {backend} | {model} | {diar} | {wer} | {der} | {miss} | {fa} | {conf} | {ts} | {ds} |".format(
+            "| {meeting} | {backend} | {model} | {diar} | {wer} | {der_raw} | {der} | "
+            "{miss} | {fa} | {conf} | {ts} | {ds} |".format(
                 meeting=r["meeting"],
                 backend=r["asr_backend"],
                 model=r["asr_model"],
                 diar=r.get("diar_model") or "—",
                 wer=_pct(wer.get("wer")),
+                der_raw=_pct(der_raw.get("der")),
                 der=_pct(der.get("der")),
                 miss=_pct(miss / total) if total else "—",
                 fa=_pct(fa / total) if total else "—",

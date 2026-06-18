@@ -57,39 +57,35 @@ def _human_label(raw_speaker: str, speaker_map: dict) -> str:
     return speaker_map[raw_speaker]
 
 
-def diarize(
+# Diarization model. Bumping this (e.g. to speaker-diarization-community-1 in #3)
+# updates both the production pipeline and the evaluation harness in one place.
+DIARIZATION_MODEL = "pyannote/speaker-diarization-3.1"
+
+
+def run_diarization(
     audio_path: str,
-    srt_path: str,
-    output_path: str,
     hf_token: str,
     device: str | None = None,
     verbose: bool = True,
-) -> Path:
+):
     """
-    Run speaker diarization on audio and apply speaker labels to an SRT transcript.
+    Run the pyannote diarization pipeline and return the raw result.
 
-    For each SRT segment, finds the pyannote speaker with the greatest temporal
-    overlap and prepends a [Speaker N] label to the subtitle content.
+    Separated from label application so callers (e.g. the evaluation harness)
+    can score pyannote's native output directly without re-running the model.
 
     Args:
         audio_path: Path to the audio WAV file (16 kHz mono is ideal)
-        srt_path: Path to the existing SRT transcript to label
-        output_path: Destination path for the labeled SRT file
         hf_token: HuggingFace access token for pyannote model download
         device: Torch device ('mps' or 'cpu'). Auto-detected if None.
         verbose: Whether to print progress information
 
     Returns:
-        Path to the labeled output SRT file
+        A pyannote.core.Annotation with the diarization result.
     """
     audio_path = Path(audio_path)
-    srt_path = Path(srt_path)
-    output_path = Path(output_path)
-
     if not audio_path.exists():
         raise FileNotFoundError(f"Audio file not found: {audio_path}")
-    if not srt_path.exists():
-        raise FileNotFoundError(f"SRT file not found: {srt_path}")
 
     # Auto-select device: prefer MPS (Apple Silicon GPU), fall back to CPU
     if device is None:
@@ -98,10 +94,10 @@ def diarize(
 
     if verbose:
         print(f"🎙️  Device: {device}")
-        print("⏳ Loading pyannote speaker diarization pipeline...")
+        print(f"⏳ Loading pyannote speaker diarization pipeline ({DIARIZATION_MODEL})...")
 
     pipeline = Pipeline.from_pretrained(
-        "pyannote/speaker-diarization-3.1",
+        DIARIZATION_MODEL,
         use_auth_token=hf_token,
     )
     pipeline.to(torch_device)
@@ -116,6 +112,51 @@ def diarize(
     )
     if verbose:
         print(f"✅ Detected {len(detected_speakers)} speaker(s): {', '.join(detected_speakers)}")
+
+    return diarization_result
+
+
+def diarize(
+    audio_path: str,
+    srt_path: str,
+    output_path: str,
+    hf_token: str = None,
+    device: str | None = None,
+    verbose: bool = True,
+    diarization=None,
+) -> Path:
+    """
+    Run speaker diarization on audio and apply speaker labels to an SRT transcript.
+
+    For each SRT segment, finds the pyannote speaker with the greatest temporal
+    overlap and prepends a [Speaker N] label to the subtitle content.
+
+    Args:
+        audio_path: Path to the audio WAV file (16 kHz mono is ideal)
+        srt_path: Path to the existing SRT transcript to label
+        output_path: Destination path for the labeled SRT file
+        hf_token: HuggingFace access token for pyannote model download
+        device: Torch device ('mps' or 'cpu'). Auto-detected if None.
+        verbose: Whether to print progress information
+        diarization: Optional precomputed diarization Annotation (from
+            run_diarization). If provided, the model is not re-run.
+
+    Returns:
+        Path to the labeled output SRT file
+    """
+    audio_path = Path(audio_path)
+    srt_path = Path(srt_path)
+    output_path = Path(output_path)
+
+    if not audio_path.exists():
+        raise FileNotFoundError(f"Audio file not found: {audio_path}")
+    if not srt_path.exists():
+        raise FileNotFoundError(f"SRT file not found: {srt_path}")
+
+    if diarization is None:
+        diarization_result = run_diarization(audio_path, hf_token, device, verbose)
+    else:
+        diarization_result = diarization
 
     with open(srt_path, "r", encoding="utf-8") as f:
         subtitles = list(srt.parse(f.read()))
