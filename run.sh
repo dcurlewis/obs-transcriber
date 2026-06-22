@@ -452,7 +452,11 @@ for entry in entries:
                     echo "Final transcript verified successfully."
                     safe_delete "$TARGET_DIR/${FINAL_BASENAME}_me.srt" "transcript file (me)"
                     safe_delete "$TARGET_DIR/${FINAL_BASENAME}_others.srt" "transcript file (others)"
-                    
+                    # Word-timing sidecars (written by transcribe.py, consumed by diarize.py)
+                    # are no longer needed once diarization/interleaving are done.
+                    safe_delete "$TARGET_DIR/${FINAL_BASENAME}_me.words.json" "word sidecar (me)"
+                    safe_delete "$TARGET_DIR/${FINAL_BASENAME}_others.words.json" "word sidecar (others)"
+
                     # Clean up the temporary directory if it's empty (no raw recording kept)
                     if [ "${KEEP_RAW_RECORDING}" != "true" ]; then
                         # Check if directory is empty
